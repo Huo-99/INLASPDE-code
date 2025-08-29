@@ -12,16 +12,16 @@ knitr::opts_chunk$set(echo = TRUE)
 #-----------------------------------------Preparation part
 
 ```{r paths}
-results_path_b<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-stepwise/backward"
-results_path_f<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-stepwise/forward"
-bart_results_path_b<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-bart/backward"
-bart_results_path_f<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-bart/forward"
-svr_results_path_b<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-svr/backward"
-svr_results_path_f<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-svr/forward"
+results_path_b<-"C:/Users/xy/Desktop/p4-INLASPDE/results-R-stepwise/backward"
+results_path_f<-"C:/Users/xy/Desktop/p4-INLASPDE/results-R-stepwise/forward"
+bart_results_path_b<-"C:/Users/xy/Desktop/p4-INLASPDE/results-R-bart/backward"
+bart_results_path_f<-"C:/Users/xy/Desktop/p4-INLASPDE/results-R-bart/forward"
+svr_results_path_b<-"C:/Users/xy/Desktop/p4-INLASPDE/results-R-svr/backward"
+svr_results_path_f<-"C:/Users/xy/Desktop/p4-INLASPDE/results-R-svr/forward"
 ```
 
 ```{r packages}
-#rm(list=ls()) #----Clear the workspace
+#rm(list=ls())
 # Load key libraries
 packages <- c("raster", "haven", "sf","sp", "tmap","tidyverse",
               "lattice", "gridExtra", "devtools", "rlang")
@@ -68,7 +68,6 @@ plot(shp["I_LHHSI"])
 #library(RColorBrewer)
 library(sf)#read and handle file
 library(cols4all)#new color bag   
-# 检查是否是有效几何,修复无效几何
 which(st_is_valid(shp)==F) ; shp <- st_make_valid(shp); which(is.na(shp))
 
 str(shp$O_LHHSI); shp$O_LHHSI <- as.numeric(shp$O_LHHSI);str(shp )
@@ -85,9 +84,6 @@ tm_shape(shp) +
  ) +
  tm_borders() +
  tm_facets(by = "Dat_Typ", ncol = 2)
-
-
-results_path_b="C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-stepwise/backward"
 dir.create(results_path_b, showWarnings = FALSE, recursive = TRUE)
 #----------------------no legend
 png(file.path(results_path_b, "I_LHHSI_map.png"), width = 2000, height = 2400, res = 500)
@@ -136,8 +132,8 @@ mod_metrics2 <- function(obs, pred)
   SS_res <- sum((obs_clean - pred_clean)^2)
   SS_tot1 <- sum((obs_clean - mean(obs_clean))^2)
    SS_tot2 <- sum(  (  obs_clean - (sum(dat$pop)-sum(obs))/(length(dat$pop)-length(obs))  )^2  )
-  R2 <- 1 - (SS_res / SS_tot1)
-  ROOS2 <- 1 - (SS_res / SS_tot2)
+  R2 <- 1 - (SS_res / SS_tot1)                      # In-Sample coefficient of determination
+  ROOS2 <- 1 - (SS_res / SS_tot2)                   # Out-Of-Sample coefficient of determination
 
   
   output <- list(MAE  = MAE,
@@ -151,7 +147,7 @@ mod_metrics2 <- function(obs, pred)
 
 ```
 
-```{r variable prepa and overdispersion test}
+```{r variable preparation and overdispersion test}
 dim(dat); dim(shp); str(dat)
 #-- Some variable recoding----
 dat$bldg <- dat$Total_Building_Count # observed building count
@@ -1113,6 +1109,7 @@ print(tbl6<-tbl6[order(tbl6$CPO), ], digits = 2)
 write.csv(tbl6, file=paste0(svr_results_path_f, "/svr_cpo_f2.csv"))
 
 ```
+
 
 
 
