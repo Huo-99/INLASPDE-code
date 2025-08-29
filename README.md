@@ -1,2 +1,2 @@
-to the dissertation
-R 4.5.1
+to the dissertation\
+using version R 4.5.1
