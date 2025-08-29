@@ -1,0 +1,1120 @@
+---
+title: "bayesian models"
+output: html_document
+date: "2025-07-27"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+#-----------------------------------------Preparation part
+
+```{r paths}
+results_path_b<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-stepwise/backward"
+results_path_f<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-stepwise/forward"
+bart_results_path_b<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-bart/backward"
+bart_results_path_f<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-bart/forward"
+svr_results_path_b<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-svr/backward"
+svr_results_path_f<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-svr/forward"
+```
+
+```{r packages}
+#rm(list=ls()) #----Clear the workspace
+# Load key libraries
+packages <- c("raster", "haven", "sf","sp", "tmap","tidyverse",
+              "lattice", "gridExtra", "devtools", "rlang")
+if(length(setdiff(packages, rownames(installed.packages()))) > 0) { 
+  install.packages(setdiff(packages, rownames(installed.packages()))) }
+#Instal INLA
+if(length(setdiff("INLA", rownames(installed.packages()))) > 0){
+  install.packages("INLA", type="binary", repos=c(getOption("repos"), INLA="https://inla.r-inla-download.org/R/stable"), dep=TRUE)
+}
+
+library(INLA)
+#lapply(packages, library, character.only = TRUE) ##--access the libraries
+library(spdep)
+library(DClusterm)
+library(viridis)
+library(tmap)
+library(tmaptools)
+library(tidymodels)
+```
+
+```{r read data}
+#| label: Files
+# Load and explore data       
+githublink <- "https://raw.github.com/wpgp/Efficient-Population-Modelling-using-INLA-SPDE/main/CMR_input_data.RData"
+load(url(githublink))
+out_path <- tempdir()# please specify your output folder here
+
+ls() # view the loaded files: Only need - dat, shp, df, div_names & reg_names 
+# dat: the input demographic data with observed population counts and covariates
+str(dat)
+#  shp: the associated shapefiles fo the combined household listing datasets
+str(shp)
+# df: contains NIS 2022 regional projections and predicted counts - for post analysis
+str(df)
+# div_names & reg_names are required for calculating agggregated totals
+str(div_names); str(reg_names)
+
+# visualise the imputed household size
+plot(shp["I_LHHSI"])
+#names(dat); table(dat$Dat_Typ) #; dat$Total_Building_Count
+#dim(shp); dim(dat) 
+
+#  visualise data sources using tmap 
+#library(RColorBrewer)
+library(sf)#read and handle file
+library(cols4all)#new color bag   
+# 检查是否是有效几何,修复无效几何
+which(st_is_valid(shp)==F) ; shp <- st_make_valid(shp); which(is.na(shp))
+
+str(shp$O_LHHSI); shp$O_LHHSI <- as.numeric(shp$O_LHHSI);str(shp )
+is.factor(shp$Dat_Typ); shp$Dat_Typ <- factor(shp$Dat_Typ)
+    
+#tmap_mode("plot")  #static plot
+tmap_mode("view")  #dynamic plot
+
+tm_shape(shp) +
+ tm_fill(
+  col = "O_LHHSI",
+  fill.scale = tm_scale(values = "brewer.ylgnbu"),
+  fill.legend = tm_legend(title = "Price in US$ per lb")
+ ) +
+ tm_borders() +
+ tm_facets(by = "Dat_Typ", ncol = 2)
+
+
+results_path_b="C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-stepwise/backward"
+dir.create(results_path_b, showWarnings = FALSE, recursive = TRUE)
+#----------------------no legend
+png(file.path(results_path_b, "I_LHHSI_map.png"), width = 2000, height = 2400, res = 500)
+plot(shp["I_LHHSI"], key.pos = NULL);dev.off()
+tmap_mode("plot")  #static plot
+m=tm_shape(shp) +
+  tm_fill(col = "O_LHHSI",
+          fill.scale = tm_scale(values = "brewer.ylgnbu")) +
+  tm_borders() +
+  tm_facets(by = "Dat_Typ", ncol = 2) +
+  tm_layout(legend.show = FALSE)   
+
+png(filename=paste0(results_path_b, "/shp_I_LHHSI.png") , width = 2000, height = 2800, res = 500)
+print(m); dev.off()
+```
+
+```{r function definition}
+#| label: Covariates scaling (Z-score)
+#| label: Model fit metrics function(assessment)
+stdize <- function(x)
+{
+  stdz <- (x - mean(x, na.rm=T))/sd(x, na.rm=T)
+  return(stdz)
+}
+
+mod_metrics2 <- function(obs, pred)
+{
+  residual = pred - obs
+  
+  MAE = mean(abs(residual), na.rm = TRUE)          # Mean Absolute Error
+
+  MSE = mean(residual^2, na.rm = TRUE)             # Mean Square Error
+  
+  RMSE = sqrt(MSE)                                 # Root Mean Square Error
+  
+  BIAS = mean(residual, na.rm = TRUE)              # Bias
+
+  
+  idx <- !is.na(obs) & !is.na(pred)
+  obs_clean <- obs[idx]
+  pred_clean <- pred[idx]
+
+  CORR = cor(obs_clean, pred_clean)                # Correlation Coefficient
+  
+  # R-squared: 1 - (residual sum of squares / total sum of squares)
+  SS_res <- sum((obs_clean - pred_clean)^2)
+  SS_tot1 <- sum((obs_clean - mean(obs_clean))^2)
+   SS_tot2 <- sum(  (  obs_clean - (sum(dat$pop)-sum(obs))/(length(dat$pop)-length(obs))  )^2  )
+  R2 <- 1 - (SS_res / SS_tot1)
+  ROOS2 <- 1 - (SS_res / SS_tot2)
+
+  
+  output <- list(MAE  = MAE,
+                 RMSE = RMSE,
+                 BIAS = abs(BIAS),
+                 CORR   = CORR,
+                 R2   = R2,
+                 ROOS2= ROOS2 )
+  return(output)
+}
+
+```
+
+```{r variable prepa and overdispersion test}
+dim(dat); dim(shp); str(dat)
+#-- Some variable recoding----
+dat$bldg <- dat$Total_Building_Count # observed building count
+(zerob <- which(dat$bldg==0)) # check if there are samples without building counts
+
+dat$pop <- dat$Imputed_LHHSIZE # Obser-ved population counts
+(zerop <- which(dat$pop==0)) # check if there are samples without population count
+
+#--overdispersion testing-----
+mean(dat$pop)
+var(dat$pop)
+library(AER) 
+m1 <- glm(pop ~ 1, family = poisson, data = dat)  # 只含截距的 Poisson
+dispersiontest(m1)#p-value = 0.0001404
+#---------------------------------
+ 
+dat$dens <- dat$pop/dat$bldg #---density variable 
+dat$dens[is.infinite(dat$dens)] = NA # check if there are infinite terms and set them to NA 
+
+dat$set_typ <- factor(dat$Settlement_Type) # settlement type
+dat$region <- factor(dat$Regions) # regions 
+
+### Extract standardized continuous geospatial covariates 
+names(dat)
+# rename model covariates as x1 - x43
+cov_rows <- 20:62; colnames(dat)[cov_rows] <- paste0("x", 1:43, sep="") 
+
+# standardize/scale 
+dat[,cov_rows] <- apply(dat[,cov_rows], 2, stdize) 
+# only put x1-x43 in mcovs
+dim(mcovs <- dat %>% dplyr::select(starts_with("x")) %>%
+      dplyr::select(-X)) 
+
+#-- Below GLM-based covariates selection will be performed.------------
+ # only significant covariates with variance inflation factor (vif) 
+ #less than 5 are selected for Bayesian modelling
+
+# Add response variable to the covariates only data; # Drop all NA's 
+mcovs$resp <- log(dat$dens); dim(mcovs <- mcovs %>% drop_na())
+
+#respplot <- ggplot(mcovs, aes(x = resp)) +
+#  geom_density(fill = "blue", alpha = 0.5) +
+#  theme_minimal() +
+#  labs(title = NULL, x = "population_density", y = "Value")
+#ggsave(filename = paste0(results_path_b, "/respplot.png"), 
+#       plot = respplot, width = 6, height = 6, dpi = 300,bg="white")
+
+
+respplot <- ggplot(mcovs, aes(x = resp)) +
+  geom_histogram(aes(y = ..density..), 
+                 bins = 30, fill = "skyblue", color = "white", alpha = 0.6) +
+  geom_density(color = "red", size = 1) +
+  theme_minimal() +
+  labs(title = NULL, x = "Population_density", y = "Density of Population_density");respplot
+
+ggsave(filename = paste0(results_path_b, "/respplot.png"), 
+       plot = respplot, width = 6, height = 6, dpi = 300, bg="white")
+
+```
+
+```{r spde-mesh prepara}
+#-- Test for Spatial Autoccorrelation using Moran's I stat------------------
+# Define the neighbors (use queen case)
+names(shp)
+#library(sf)#library(tmap)
+library(spdep)
+
+# check for invalid geometries, and fix if any
+table(st_is_valid(shp))
+dim(valid <- st_make_valid(shp))
+shp <- valid ; table(st_is_valid(shp))
+# Check for empty polygons, and remove if any
+table(st_is_empty(shp))
+
+### build neighbourhood structures 
+
+####------------------------------------------------
+#shp_proj <- st_transform(shp, 32632)
+#coords   <- st_coordinates(st_centroid(shp_proj))
+#dup_id   <- duplicated(coords)        # TRUE 处是重复质心
+#set.seed(35642114)
+#coords[dup_id, ] <- coords[dup_id, ] +
+# matrix(runif(sum(dup_id)*2, -0.01, 0.01), ncol = 2)  # ±1 cm
+#nb <- knn2nb(knearneigh(coords, k = 6)) ; table(card(nb))# no 0 then can do Moran's I, LISA, spatial reg
+############----------------------------------------------------
+
+nb <- poly2nb(shp, queen=TRUE)  
+#table(card(nb))#0的个数为孤岛???;1e-7 is default
+#将空间邻接对??? nb 转换为空间权重矩???(spatial weights list)
+#的格???,用于后续的空间分???(??? Moran’s I、空间回归等)
+lw <- nb2listw(nb, style="W", zero.policy=TRUE)
+
+moran.test(shp$O_LHHSI,lw, alternative="greater", zero.policy=TRUE)
+# O_LHHSI: is the population size variable
+# Moran's I stat = 0.149, p-value = 0.0002; k近邻后statistic=0.115, p-value <2.2e-16
+# there is spatial clutering in the data
+
+#-- INLA-SPDE latent field preparation-------------
+# Select the coordinates of the EA centroids
+shp2 <- as(st_geometry(shp), "Spatial")
+dat$lon <- coordinates(shp2)[,1] # longitude
+dat$lat <- coordinates(shp2)[,2] # latitude
+coords = cbind(dat$lon, dat$lat)
+```
+
+```{r add interaction}
+#-- Some variable recoding----
+# create interaction term set_reg : settlement type - regions 
+Zsr <- as(model.matrix( ~ 0 + region:set_typ, data = dat), "Matrix")
+dat$IDsr <- 1:nrow(dat)
+dat$set_reg <- as.factor(apply(Zsr, 1, function(x){names(x)[x == 1]}))#interaction term
+names(dat)
+
+# add data source random effect
+dat$source <- factor(dat$Dat_Typ)
+```
+
+```{r mesh 690 and projector A}
+#----build mesh------
+non_convex_bdry <- inla.nonconvex.hull(coords, -0.035, -0.05, resolution = c(100, 100))
+mesh <- inla.mesh.2d(boundary = non_convex_bdry, max.edge=c(0.5,1), 
+                     offset = c(0.5, 1),
+                     cutoff = 0.2)
+png(paste0(results_path_b, "/mesh.png"))
+plot(mesh)
+plot(shp, add=T, col= "grey")
+points(coords, cex=0.6, col="red", pch=16)
+#dev.off()
+mesh$n # Number of mesh nodes 690
+
+#-----Build projector matrix A----------
+A<-inla.spde.make.A(mesh=mesh,loc=as.matrix(coords)) 
+```
+
+```{r Different SPDE priors}
+##------Create the SPDE (Matern)
+
+#default Gaussian priors
+#spde <- inla.spde2.matern(mesh, alpha=2)   # B.tau = cbind(0,1),B.kappa = cbind(1,0)
+
+#weakly informative pc
+#spde <- inla.spde2.pcmatern(
+
+ # Mesh and smoothness parameter
+ # mesh, alpha = 2,
+  #prior.range = c(2.7, 0.05),
+  #prior.sigma = c(0.3, 0.05)     # P(sigma > 0.3) = 0.05
+
+ # ) 
+
+
+#Strong informative_pc
+#spde <- inla.spde2.pcmatern(
+#  mesh, alpha = 2,
+#  prior.range = c(4.0, 0.01),    # P(rho < 4.0 degrees) = 0.01 
+#  prior.sigma = c(0.2, 0.01)   # P(sigma > 0.2) = 0.01
+#)
+
+# target (rho*, sigma*)
+rho_star <- 4.00    # degrees
+sigma_star <- 0.20
+
+kappa_star <- sqrt(8) / rho_star
+tau_star   <- 1 / (sigma_star * sqrt(4*pi) * kappa_star)
+
+spde <- inla.spde2.matern(
+  mesh, alpha = 2,
+  theta.prior.mean = c(log(kappa_star), log(tau_star)),
+  theta.prior.prec = c(50, 50)
+)
+
+##----specify the observation indices for estimation 
+iset <- inla.spde.make.index(name = "spatial.field", spde$n.spde)
+
+dim(A)
+
+#-- visualise the spatial fields of the best model----
+gproj <- inla.mesh.projector(mesh,  dims = c(300, 300))
+#创建一个空间投影器,用于将空间场投影到300*300的规则网格上
+bb <- non_convex_bdry$loc # the coordiates (提取原始构建的非凸包边界)
+
+library(splancs) # for inout function for mapping-哪些300*300网格点落在边界bb之内
+table(xy.in <- inout(gproj$lattice$loc,bb))
+# FALSE  TRUE # 30229个网格点落在边界(可以用来画图),其余的要删除
+# 59771 30229
+#FALSE  TRUE 
+#59468 30532 
+```
+
+```{r uncertainty using }
+#| label: preparation
+data_path<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/code"
+pred_data <- readRDS(paste0(data_path, "/full_prediction_data.RDS"))
+data <- pred_data
+head(data)
+data[,1:43] <- apply(data[,1:43], 2, stdize) 
+
+# Prediction covs matrix
+Apred <- inla.spde.make.A(mesh = mesh, loc = cbind(data$Lon, data$Lat))
+
+dim(Apred) # 1327458 points are gonna be predicted,the grid has 690 nodes
+```
+
+
+#-----------------------------------------Models fitting
+
+```{r  stepwisebackward}
+#| label: get the best spatial model
+
+# Extract model covariates and variables for for data stack 
+covars_est <- dat[,c("x2","x3","x17","x21","x32","x34","x40","x42"
+                     , "set_reg", "set_typ", "region", "source","IDsr")]; dim(covars_est)
+names(dat)
+
+#-- Build data stack----
+stk_est <- inla.stack(data=list(y=dat$dens), # the response variable 
+                      
+                      A=list(A,1),  # the A matrix; the 1 is included to make the list(covariates)
+                      effects=list(c(list(Intercept=1), # the Intercept
+                                     iset),  # the spatial index
+                                   list(covars_est)# the covariates
+                      ), 
+                      #this is a quick name so you can call upon easily
+                      tag='est')
+
+#-- build spatial models----
+# Model 1: covs + Spatial autocor + settlement type
+set.seed(35642114)
+#dat$log_exposure <- log(pmax(dat$exposure, 1e-8))
+form1 <- y ~ -1 + Intercept + x2 + x3 + x17 + x21 + x32 + x34 + x40 + x42 + f(spatial.field, model = spde) +
+  f(IDsr, model='iid') + f(source, model='iid') + f(set_typ, model='iid')
+
+mod1 <-inla(form1, #the formula
+            data=inla.stack.data(stk_est,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(stk_est),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+# Model 1.2: covs + Spatial autocor + region
+form1.2 <- y ~ -1 + Intercept + x2 + x3 + x17 + x21 + x32 + x34 + x40 + x42 + f(spatial.field, model = spde) +
+ f(IDsr, model='iid') + f(source, model='iid') + f(region, model='iid') 
+
+mod1.2 <-inla(form1.2, #the formula
+            data=inla.stack.data(stk_est,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(stk_est),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 2: covs + Spatial autocor + settlement type + region random effects
+form2 <- y ~ -1 + Intercept + x2 + x3 + x17 + x21 + x32 + x34 + x40 + x42 + f(spatial.field, model=spde) +
+  f(IDsr, model='iid') + f(source, model='iid') + f(set_typ, model='iid') + f(region, model='iid') 
+
+mod2<-inla(form2, #the formula
+           data=inla.stack.data(stk_est,spde=spde),  #the data stack
+           family= 'gamma',   #which family the data comes from
+           control.predictor=list(A=inla.stack.A(stk_est),compute=TRUE),  #compute gives you the marginals of the linear predictor
+           control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+           verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 3 : covs + Spatial autocor + settlement type - region interactions effects
+form3 <- y ~  -1 + Intercept + x2 + x3 + x17 + x21 + x32 + x34 + x40 + x42 + f(spatial.field, model=spde) +
+  f(IDsr, model='iid') + f(source, model='iid') + f(set_reg, model='iid') 
+
+mod3 <-inla(form3, #the formula
+            data=inla.stack.data(stk_est,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(stk_est),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 4 : covs + Spatial autocor + settlement type - region interactions effects + settlement type
+form4 <- y ~  -1 + Intercept + x2 + x3 + x17 + x21 + x32 + x34 + x40 + x42 + f(spatial.field, model=spde) +
+  f(IDsr, model='iid') +
+ f(source, model='iid') + f(set_reg, model='iid') +  f(set_typ, model='iid')
+
+mod4 <-inla(form4, #the formula
+            data=inla.stack.data(stk_est,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(stk_est),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 4.2 : covs + Spatial autocor + settlement type - region interactions effects + region
+form4.2 <- y ~  -1 + Intercept  + x2 + x3 + x17 + x21 + x32 + x34 + x40 + x42 + f(spatial.field, model=spde)+
+ f(IDsr, model='iid') + f(source, model='iid') + f(set_reg, model='iid') +  f(region, model='iid')
+
+mod4.2 <-inla(form4.2, #the formula
+            data=inla.stack.data(stk_est,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(stk_est),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+# Model 5 : covs + Spatial autocor + settlement type - region interactions effects + settlement type + region
+form5 <- y ~  -1 + Intercept  + x2 + x3 + x17 + x21 + x32 + x34 + x40 + x42 + f(spatial.field, model=spde)+
+ f(IDsr, model='iid') + f(source, model='iid') + f(set_reg, model='iid') + f(set_typ, model='iid') + f(region, model='iid')
+
+mod5 <-inla(form5, #the formula
+            data=inla.stack.data(stk_est,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(stk_est),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+## Run Model fit checks 
+mods <- list(
+ Model1   = mod1,
+ Model2   = mod1.2,
+ Model3   = mod2,
+ Model4   = mod3,
+ Model5   = mod4,
+ Model6   = mod4.2,
+ Model7   = mod5
+)
+
+tbl <- data.frame(
+ Model = names(mods), 
+ CPO  = sapply(mods, \(m) (LPML <- abs(sum(log(m$cpo$cpo), na.rm = TRUE)))), 
+ WAIC  = sapply(mods, \(m) m$waic$waic),
+ DIC   = sapply(mods, \(m) m$dic$dic),
+ row.names = NULL
+)
+
+print(tbl<-tbl[order(tbl$CPO), ], digits = 2)
+
+write.csv(tbl, file=paste0(results_path_b, "/stepwise_cpo_b.csv"))
+
+#abs(sum(log(mod4$cpo$cpo), na.rm = TRUE));mod4$waic$waic;mod4$dic$dic#with IDsr
+#[1] 7329.587
+#[1] 1515.804
+#[1] 1909.529
+
+```
+
+```{r stepwiseforward}
+#| label: get the best spatial model
+# Extract model covariates and variables for for data stack 
+covars_est_f <- dat[,c("x6", "x17", "x21", "x32", "x34",
+                     "x42", "set_reg", "set_typ", "region", "source","IDsr")]; dim(covars_est_f)
+
+#-- Build data stack----
+stk_est_f <- inla.stack(data=list(y=dat$dens), # the response variable 
+                      
+                      A=list(A,1),  # the A matrix; the 1 is included to make the list(covariates)
+                      effects=list(c(list(Intercept=1), # the Intercept
+                                     iset),  # the spatial index
+                                   list(covars_est_f)# the covariates
+                      ), 
+                      #this is a quick name so you can call upon easily
+                      tag='est')
+
+#-- build spatial models----
+# Model 1: covs + Spatial autocor + settlement type
+form_f1 <- y ~ -1 + Intercept + x6 +  x17 + x21 + x32 + x34 + x42 + f(spatial.field, model = spde) +
+  f(IDsr, model='iid') + f(source, model='iid') + f(set_typ, model='iid') 
+
+mod_f1 <-inla(form_f1, #the formula
+            data=inla.stack.data(stk_est_f,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(stk_est_f),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #mod_fel diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the mod_fel runs
+
+# Model 1.2: covs + Spatial autocor + region
+form_f1.2 <- y ~ -1 + Intercept + x6 +  x17 + x21 + x32 + x34 + x42 + f(spatial.field, model = spde) +
+ f(IDsr, model='iid') + f(source, model='iid') + f(region, model='iid') 
+
+mod_f1.2 <-inla(form_f1.2, #the formula
+            data=inla.stack.data(stk_est_f,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(stk_est_f),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 2: covs + Spatial autocor + settlement type + region random effects
+form_f2 <- y ~ -1 + Intercept + x6 +  x17 + x21 + x32 + x34 + x42 + f(spatial.field, model=spde) +
+  f(IDsr, model='iid') + f(source, model='iid') + f(set_typ, model='iid') + f(region, model='iid') 
+
+mod_f2<-inla(form_f2, #the formula
+           data=inla.stack.data(stk_est_f,spde=spde),  #the data stack
+           family= 'gamma',   #which family the data comes from
+           control.predictor=list(A=inla.stack.A(stk_est_f),compute=TRUE),  #compute gives you the marginals of the linear predictor
+           control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+           verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 3 : covs + Spatial autocor + settlement type - region interactions effects
+form_f3 <- y ~  -1 + Intercept + x6 +  x17 + x21 + x32 + x34 + x42 + f(spatial.field, model=spde) +
+  f(IDsr, model='iid') + f(source, model='iid') + f(set_reg, model='iid') 
+
+mod_f3 <-inla(form_f3, #the formula
+            data=inla.stack.data(stk_est_f,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(stk_est_f),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 4 : covs + Spatial autocor + settlement type - region interactions effects + settlement type
+form_f4 <- y ~  -1 + Intercept + x6 +  x17 + x21 + x32 + x34 + x42 + f(spatial.field, model=spde) +
+  f(IDsr, model='iid') + f(source, model='iid') + f(set_reg, model='iid') +  f(set_typ, model='iid')
+
+mod_f4 <-inla(form_f4, #the formula
+            data=inla.stack.data(stk_est_f,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(stk_est_f),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 4.2 : covs + Spatial autocor + settlement type - region interactions effects + region
+form_f4.2 <- y ~  -1 + Intercept  + x6 +  x17 + x21 + x32 + x34 + x42 + f(spatial.field, model=spde)+
+ f(IDsr, model='iid') + f(source, model='iid') + f(set_reg, model='iid') +  f(region, model='iid')
+
+mod_f4.2 <-inla(form_f4.2, #the formula
+            data=inla.stack.data(stk_est_f,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(stk_est_f),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+# Model 5 : covs + Spatial autocor + settlement type - region interactions effects + settlement type + region
+form_f5 <- y ~  -1 + Intercept  + x6 +  x17 + x21 + x32 + x34 + x42 + f(spatial.field, model=spde)+
+ f(IDsr, model='iid') + f(source, model='iid') + f(set_reg, model='iid') + f(set_typ, model='iid') + f(region, model='iid')
+
+mod_f5 <-inla(form_f5, #the formula
+            data=inla.stack.data(stk_est_f,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(stk_est_f),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+## Run Model fit checks 
+mods2 <- list(
+ Model1   = mod_f1,
+ Model2 = mod_f1.2,
+ Model3   = mod_f2,
+ Model4   = mod_f3,
+ Model5   = mod_f4,
+ Model6 = mod_f4.2,
+ Model7   = mod_f5
+)
+
+tbl2 <- data.frame(
+  Model = names(mods2),
+  CPO   = sapply(mods2, function(m) abs(sum(log(m$cpo$cpo), na.rm = TRUE))),
+  WAIC  = sapply(mods2, function(m) m$waic$waic),
+  DIC   = sapply(mods2, function(m) m$dic$dic),
+  row.names = NULL
+)
+
+print(tbl2<-tbl2[order(tbl2$CPO), ], digits = 2)
+
+write.csv(tbl2, file=paste0(results_path_f, "/stepwise_cpo_f2.csv"))
+```
+
+```{r bart-backward}
+#| label: get the best spatial model
+# Extract model covariates and variables for for data stack 
+bart_covars_est <- dat[,c("x16","x11","x7","x13","x40","x1","x25","x43"
+                          , "set_reg", "set_typ", "region", "source","IDsr")]; dim(bart_covars_est)
+names(dat)
+
+#-- Build data stack----
+bart_stk_est <- inla.stack(data=list(y=dat$dens), # the response variable 
+                      
+                      A=list(A,1),  # the A matrix; the 1 is included to make the list(covariates)
+                      
+                      
+                      effects=list(c(list(Intercept=1), # the Intercept
+                                     iset),  # the spatial index
+                                   list(bart_covars_est)# the covariates
+                      ), 
+                      #this is a quick name so you can call upon easily
+                      tag='est')
+
+#-- build spatial models----
+# Model 1: covS_bart + Spatial autocor + settlement type
+bart_form1 <- y ~ -1 + Intercept + x16 + x11 + x7 + x13 + x40 + x1 + x25 + x43 + f(spatial.field, model = spde) +
+  f(IDsr, model='iid') + f(source, model='iid') + f(set_typ, model='iid') 
+
+bart_mod1 <-inla(bart_form1, #the bart_formula
+            data=inla.stack.data(bart_stk_est,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(bart_stk_est),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 1.2: covS_bart + Spatial autocor + region
+bart_form1.2 <- y ~ -1 + Intercept +x16 + x11 + x7 + x13 + x40 + x1 + x25 + x43 + f(spatial.field, model = spde) +
+ f(IDsr, model='iid') + f(source, model='iid') + f(region, model='iid') 
+
+bart_mod1.2 <-inla(bart_form1.2, #the bart_formula
+            data=inla.stack.data(bart_stk_est,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(bart_stk_est),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 2: covS_bart + Spatial autocor + settlement type + region random effects
+bart_form2 <- y ~ -1 + Intercept + x16 + x11 + x7 + x13 + x40 + x1 + x25 + x43 + f(spatial.field, model=spde) +
+  f(IDsr, model='iid') + f(source, model='iid') + f(set_typ, model='iid') + f(region, model='iid') 
+
+bart_mod2<-inla(bart_form2, #the bart_formula
+           data=inla.stack.data(bart_stk_est,spde=spde),  #the data stack
+           family= 'gamma',   #which family the data comes from
+           control.predictor=list(A=inla.stack.A(bart_stk_est),compute=TRUE),  #compute gives you the marginals of the linear predictor
+           control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+           verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 3 : covS_bart + Spatial autocor + settlement type - region interactions effects
+bart_form3 <- y ~  -1 + Intercept + x16 + x11 + x7 + x13 + x40 + x1 + x25 + x43 + f(spatial.field, model=spde) +
+  f(IDsr, model='iid') + f(source, model='iid') + f(set_reg, model='iid') 
+
+bart_mod3 <-inla(bart_form3, #the bart_formula
+            data=inla.stack.data(bart_stk_est,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(bart_stk_est),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+# Model 4 : covS_bart + Spatial autocor + settlement type - region interactions effects + settlement type
+bart_form4 <- y ~  -1 + Intercept + x16 + x11 + x7 + x13 + x40 + x1 + x25 + x43 + f(spatial.field, model=spde) +
+  f(IDsr, model='iid') + f(source, model='iid') + f(set_reg, model='iid') +  f(set_typ, model='iid')
+
+bart_mod4 <-inla(bart_form4, #the bart_formula
+            data=inla.stack.data(bart_stk_est,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(bart_stk_est),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 4.2 : covS_bart + Spatial autocor + settlement type - region interactions effects + region
+bart_form4.2 <- y ~  -1 + Intercept  + x16 + x11 + x7 + x13 + x40 + x1 + x25 + x43 + f(spatial.field, model=spde)+
+ f(IDsr, model='iid') + f(source, model='iid') + f(set_reg, model='iid') +  f(region, model='iid')
+
+bart_mod4.2 <-inla(bart_form4.2, #the bart_formula
+            data=inla.stack.data(bart_stk_est,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(bart_stk_est),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 5 : covS_bart + Spatial autocor + settlement type - region interactions effects + settlement type + region
+bart_form5 <- y ~  -1 + Intercept  + x16 + x11 + x7 + x13 + x40 + x1 + x25 + x43 + f(spatial.field, model=spde)+
+ f(IDsr, model='iid') + f(source, model='iid') + f(set_reg, model='iid') + f(set_typ, model='iid') + f(region, model='iid')
+
+bart_mod5 <-inla(bart_form5, #the bart_formula
+            data=inla.stack.data(bart_stk_est,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(bart_stk_est),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+## Run Model fit checks 
+mods3 <- list(
+ Model1   = bart_mod1,
+ Model2 = bart_mod1.2,
+ Model3   = bart_mod2,
+ Model4   = bart_mod3,
+ Model5   = bart_mod4,
+ Model6   = bart_mod4.2,
+ Model7   = bart_mod5
+)
+
+tbl3 <- data.frame(
+ Model = names(mods3),
+ CPO  = sapply(mods3, \(m) (LPML <- -(sum(log(m$cpo$cpo), na.rm = TRUE)))),
+ WAIC  = sapply(mods3, \(m) m$waic$waic),
+ DIC   = sapply(mods3, \(m) m$dic$dic),
+ row.names = NULL
+)
+
+print(tbl3<-tbl3[order(tbl3$CPO), ], digits = 2)
+
+write.csv(tbl3, file=paste0(bart_results_path_b, "/bart_cpo_b2.csv"))
+
+```
+
+```{r bart-forward}
+#| label: get the best spatial model
+# Extract model covariates and variables for for data stack 
+bart_covars_est_f <- dat[,c("x16","x11","x7","x13","x40","x1",
+                            "set_reg", "set_typ", "region", "source","IDsr")]; dim(bart_covars_est_f)
+
+#-- Build data stack----
+bart_stk_est_f <- inla.stack(data=list(y=dat$dens), # the response variable 
+                      A=list(A,1),  # the A matrix; the 1 is included to make the list(covariates)
+                      effects=list(c(list(Intercept=1), # the Intercept
+                                     iset),  # the spatial index
+                                   list(bart_covars_est_f)# the covariates
+                      ), 
+                      #this is a quick name so you can call upon easily
+                      tag='est')
+
+#-- build spatial models----
+# Model 1: covS_bart + Spatial autocor + settlement type
+bart_f_form1 <- y ~ -1 + Intercept +  x16 + x11 + x7 + x13 + x40 + x1  + f(spatial.field, model = spde) +
+  f(IDsr, model='iid') + f(source, model='iid') + f(set_typ, model='iid')#+ x40 + x11 
+
+bart_f_mod1 <-inla(bart_f_form1, #the bart_formula
+            data=inla.stack.data(bart_stk_est_f,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(bart_stk_est_f),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #f_model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the f_model runs
+
+
+# f_model 1.2: covS_bart + Spatial autocor + region
+bart_f_form1.2 <- y ~ -1 + Intercept + x16 + x11 + x7 + x13 + x40 + x1  + f(spatial.field, model = spde) +
+ f(IDsr, model='iid') + f(source, model='iid') + f(region, model='iid') 
+
+bart_f_mod1.2 <-inla(bart_f_form1.2, #the bart_formula
+            data=inla.stack.data(bart_stk_est_f,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(bart_stk_est_f),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 2: covS_bart + Spatial autocor + settlement type + region random effects
+bart_f_form2 <- y ~ -1 + Intercept +  x16 + x11 + x7 + x13 + x40 + x1  + f(spatial.field, model=spde) +
+  f(IDsr, model='iid') + f(source, model='iid') + f(set_typ, model='iid') + f(region, model='iid') 
+
+bart_f_mod2<-inla(bart_f_form2, #the bart_formula
+           data=inla.stack.data(bart_stk_est_f,spde=spde),  #the data stack
+           family= 'gamma',   #which family the data comes from
+           control.predictor=list(A=inla.stack.A(bart_stk_est_f),compute=TRUE),  #compute gives you the marginals of the linear predictor
+           control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+           verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 3 : covS_bart + Spatial autocor + settlement type - region interactions effects
+bart_f_form3 <- y ~  -1 + Intercept +  x16 + x11 + x7 + x13 + x40 + x1  + f(spatial.field, model=spde) +
+  f(IDsr, model='iid') + f(source, model='iid') + f(set_reg, model='iid') 
+
+bart_f_mod3 <-inla(bart_f_form3, #the bart_formula
+            data=inla.stack.data(bart_stk_est_f,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(bart_stk_est_f),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+# Model 4 : covS_bart + Spatial autocor + settlement type - region interactions effects + settlement type
+bart_f_form4 <- y ~  -1 + Intercept +  x16 + x11 + x7 + x13 + x40 + x1  + f(spatial.field, model=spde) +
+  f(IDsr, model='iid') + f(source, model='iid') + f(set_reg, model='iid') +  f(set_typ, model='iid')
+
+bart_f_mod4 <-inla(bart_f_form4, #the bart_formula
+            data=inla.stack.data(bart_stk_est_f,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(bart_stk_est_f),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 4.2 : covS_bart + Spatial autocor + settlement type - region interactions effects + region
+bart_f_form4.2 <- y ~  -1 + Intercept  +  x16 + x11 + x7 + x13 + x40 + x1  + f(spatial.field, model=spde)+
+ f(IDsr, model='iid') + f(source, model='iid') + f(set_reg, model='iid') +  f(region, model='iid')
+
+bart_f_mod4.2 <-inla(bart_f_form4.2, #the bart_formula
+            data=inla.stack.data(bart_stk_est_f,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(bart_stk_est_f),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 5 : covS_bart + Spatial autocor + settlement type - region interactions effects + settlement type + region
+bart_f_form5 <- y ~  -1 + Intercept  +  x16 + x11 + x7 + x13 + x40 + x1  + f(spatial.field, model=spde)+
+ f(IDsr, model='iid') + f(source, model='iid') + f(set_reg, model='iid') + f(set_typ, model='iid') + f(region, model='iid')
+
+bart_f_mod5 <-inla(bart_f_form5, #the bart_f_formula
+            data=inla.stack.data(bart_stk_est_f,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(bart_stk_est_f),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+## Run Model fit checks 
+mods4 <- list(
+ Model1   = bart_f_mod1,
+ Model2   = bart_f_mod1.2,
+ Model3   = bart_f_mod2,
+ Model4   = bart_f_mod3,
+ Model5   = bart_f_mod4,
+ Model6   = bart_f_mod4.2,
+ Model7   = bart_f_mod5
+)
+
+tbl4 <- data.frame(
+  Model = names(mods4),
+  CPO   = sapply(mods4, function(m) abs(sum(log(m$cpo$cpo), na.rm = TRUE))),  
+  WAIC  = sapply(mods4, function(m) m$waic$waic),
+  DIC   = sapply(mods4, function(m) m$dic$dic),
+  row.names = NULL
+)
+
+print(tbl4<-tbl4[order(tbl4$CPO), ], digits = 2)
+
+write.csv(tbl4, file=paste0(bart_results_path_f, "/bart_cpo_f3.csv"))
+
+```
+
+```{r svr-backward}
+#| label: get the best spatial model
+# Extract model covariates and variables for for data stack 
+svr_covars_est <- dat[,c("x13","x14","x15","x9","x24","x32","x40","x12",
+                          "set_reg", "set_typ", "region", "source","IDsr")]; dim(svr_covars_est)
+names(dat)
+
+#-- Build data stack----
+svr_stk_est <- inla.stack(data=list(y=dat$dens), # the response variable 
+                      
+                      A=list(A,1),  # the A matrix; the 1 is included to make the list(covariates)
+                      #第一个是空间投影矩阵，第二个用于固定效应
+                      
+                      effects=list(c(list(Intercept=1), # the Intercept
+                                     iset),  # the spatial index
+                                   list(svr_covars_est)# the covariates
+                      ), 
+                      #this is a quick name so you can call upon easily
+                      tag='est')#给这个stack起这个名字
+
+#-- build spatial models----
+# Model 1: covS_svr + Spatial autocor + settlement type
+svr_form1 <- y ~ -1 + Intercept + x13 + x14 + x15 + x9 + x24 + x32 + x40 + x12 + f(spatial.field, model = spde) +
+  f(IDsr, model='iid') + f(source, model='iid') + f(set_typ, model='iid') 
+
+svr_mod1 <-inla(svr_form1, #the svr_formula
+            data=inla.stack.data(svr_stk_est,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(svr_stk_est),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 1.2: covS_svr + Spatial autocor + region
+svr_form1.2 <- y ~ -1 + Intercept + x13 + x14 + x15 + x9 + x24 + x32 + x40 + x12 + f(spatial.field, model = spde) +
+ f(IDsr, model='iid') + f(source, model='iid') + f(region, model='iid') 
+
+svr_mod1.2 <-inla(svr_form1.2, #the svr_formula
+            data=inla.stack.data(svr_stk_est,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(svr_stk_est),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 2: covS_svr + Spatial autocor + settlement type + region random effects
+svr_form2 <- y ~ -1 + Intercept + x13 + x14 + x15 + x9 + x24 + x32 + x40 + x12 + f(spatial.field, model=spde) +
+  f(IDsr, model='iid') + f(source, model='iid') + f(set_typ, model='iid') + f(region, model='iid') 
+
+svr_mod2<-inla(svr_form2, #the svr_formula
+           data=inla.stack.data(svr_stk_est,spde=spde),  #the data stack
+           family= 'gamma',   #which family the data comes from
+           control.predictor=list(A=inla.stack.A(svr_stk_est),compute=TRUE),  #compute gives you the marginals of the linear predictor
+           control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+           verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 3 : covS_svr + Spatial autocor + settlement type - region interactions effects
+svr_form3 <- y ~  -1 + Intercept + x13 + x14 + x15 + x9 + x24 + x32 + x40 + x12 + f(spatial.field, model=spde) +
+  f(IDsr, model='iid') + f(source, model='iid') + f(set_reg, model='iid') 
+
+svr_mod3 <-inla(svr_form3, #the svr_formula
+            data=inla.stack.data(svr_stk_est,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(svr_stk_est),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 4 : covS_svr + Spatial autocor + settlement type - region interactions effects + settlement type
+svr_form4 <- y ~  -1 + Intercept + x13 + x14 + x15 + x9 + x24 + x32 + x40 + x12 + f(spatial.field, model=spde) +
+  f(IDsr, model='iid') + f(source, model='iid') + f(set_reg, model='iid') +  f(set_typ, model='iid')
+
+svr_mod4 <-inla(svr_form4, #the svr_formula
+            data=inla.stack.data(svr_stk_est,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(svr_stk_est),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 4.2 : covS_svr + Spatial autocor + settlement type - region interactions effects + region
+svr_form4.2 <- y ~  -1 + Intercept  + x13 + x14 + x15 + x9 + x24 + x32 + x40 + x12 + f(spatial.field, model=spde)+
+ f(IDsr, model='iid') + f(source, model='iid') + f(set_reg, model='iid') +  f(region, model='iid')
+
+svr_mod4.2 <-inla(svr_form4.2, #the svr_formula
+            data=inla.stack.data(svr_stk_est,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(svr_stk_est),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+# Model 5 : covS_svr + Spatial autocor + settlement type - region interactions effects + settlement type + region
+svr_form5 <- y ~  -1 + Intercept  + x13 + x14 + x15 + x9 + x24 + x32 + x40 + x12 + f(spatial.field, model=spde)+
+ f(IDsr, model='iid') + f(source, model='iid') + f(set_reg, model='iid') + f(set_typ, model='iid') + f(region, model='iid')
+
+svr_mod5 <-inla(svr_form5, #the svr_formula
+            data=inla.stack.data(svr_stk_est,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(svr_stk_est),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+## Run Model fit checks 
+mods5 <- list(
+ Model1   = svr_mod1,
+ Model2   = svr_mod1.2,
+ Model3   = svr_mod2,
+ Model4   = svr_mod3,
+ Model5   = svr_mod4,
+ Model6   = svr_mod4.2,
+ Model7   = svr_mod5
+)
+
+tbl5 <- data.frame(
+ Model = names(mods5), 
+ CPO  = sapply(mods5, \(m) (LPML <- abs(sum(log(m$cpo$cpo), na.rm = TRUE)))),
+ WAIC  = sapply(mods5, \(m) m$waic$waic),
+ DIC   = sapply(mods5, \(m) m$dic$dic),
+ row.names = NULL
+)
+print(tbl5<-tbl5[order(tbl5$CPO), ], digits = 2)
+
+write.csv(tbl5, file=paste0(svr_results_path_b, "/svr_cpo_b2.csv"))
+
+```
+
+```{r svr-forward}
+#| label: get the best spatial model
+# Extract model covariates and variables for for data stack 
+svr_covars_est_f <- dat[,c("x13","x14","x15","x9","x24","x32", 
+                         "set_reg", "set_typ", "region", "source","IDsr")]; dim(svr_covars_est_f)
+
+#-- Build data stack----
+svr_stk_est_f <- inla.stack(data=list(y=dat$dens), # the response variable 
+                      A=list(A,1),  # the A matrix; the 1 is included to make the list(covariates)
+                      effects=list(c(list(Intercept=1), # the Intercept
+                                     iset),  # the spatial index
+                                   list(svr_covars_est_f)# the covariates
+                      ), 
+                      #this is a quick name so you can call upon easily
+                      tag='est')
+
+#-- build spatial models----
+# Model 1: covS_svr + Spatial autocor + settlement type
+svr_f_form1 <- y ~ -1 + Intercept + x13 + x14 + x15 + x9 + x24 + x32 + f(spatial.field, model = spde) +
+  f(IDsr, model='iid') + f(source, model='iid') + f(set_typ, model='iid') 
+
+svr_f_mod1 <-inla(svr_f_form1, #the svr_f_formula
+            data=inla.stack.data(svr_stk_est_f,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(svr_stk_est_f),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 1.2: covS_svr + Spatial autocor + region
+svr_f_form1.2 <- y ~ -1 + Intercept + x13 + x14 + x15 + x9 + x24 + x32 + f(spatial.field, model = spde) +
+ f(IDsr, model='iid') + f(source, model='iid') + f(region, model='iid') 
+
+svr_f_mod1.2 <-inla(svr_f_form1.2, #the svr_f_formula
+            data=inla.stack.data(svr_stk_est_f,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(svr_stk_est_f),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 2: covS_svr + Spatial autocor + settlement type + region random effects
+svr_f_form2 <- y ~ -1 + Intercept + x13 + x14 + x15 + x9 + x24 + x32 + f(spatial.field, model=spde) +
+  f(IDsr, model='iid') + f(source, model='iid') + f(set_typ, model='iid') + f(region, model='iid') 
+
+svr_f_mod2<-inla(svr_f_form2, #the svr_f_formula
+           data=inla.stack.data(svr_stk_est_f,spde=spde),  #the data stack
+           family= 'gamma',   #which family the data comes from
+           control.predictor=list(A=inla.stack.A(svr_stk_est_f),compute=TRUE),  #compute gives you the marginals of the linear predictor
+           control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+           verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 3 : covS_svr + Spatial autocor + settlement type - region interactions effects
+svr_f_form3 <- y ~  -1 + Intercept + x13 + x14 + x15 + x9 + x24 + x32 + f(spatial.field, model=spde) +
+  f(IDsr, model='iid') + f(source, model='iid') + f(set_reg, model='iid') 
+
+svr_f_mod3 <-inla(svr_f_form3, #the svr_f_formula
+            data=inla.stack.data(svr_stk_est_f,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(svr_stk_est_f),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 4 : covS_svr + Spatial autocor + settlement type - region interactions effects + settlement type
+svr_f_form4 <- y ~  -1 + Intercept + x13 + x14 + x15 + x9 + x24 + x32 + f(spatial.field, model=spde) +
+  f(IDsr, model='iid') + f(source, model='iid') + f(set_reg, model='iid') +  f(set_typ, model='iid')
+
+svr_f_mod4 <-inla(svr_f_form4, #the svr_f_formula
+            data=inla.stack.data(svr_stk_est_f,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(svr_stk_est_f),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+
+# Model 4.2 : covS_svr + Spatial autocor + settlement type - region interactions effects + region
+svr_f_form4.2 <- y ~  -1 + Intercept  + x13 + x14 + x15 + x9 + x24 + x32 + f(spatial.field, model=spde)+
+ f(IDsr, model='iid') + f(source, model='iid') + f(set_reg, model='iid') +  f(region, model='iid')
+
+svr_f_mod4.2 <-inla(svr_f_form4.2, #the svr_f_formula
+            data=inla.stack.data(svr_stk_est_f,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(svr_stk_est_f),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+
+# Model 5 : covS_svr + Spatial autocor + settlement type - region interactions effects + settlement type + region
+svr_f_form5 <- y ~  -1 + Intercept  + x13 + x14 + x15 + x9 + x24 + x32 + f(spatial.field, model=spde)+
+ f(IDsr, model='iid') + f(source, model='iid') + f(set_reg, model='iid') + f(set_typ, model='iid') + f(region, model='iid')
+
+svr_f_mod5 <-inla(svr_f_form5, #the svr_f_formula
+            data=inla.stack.data(svr_stk_est_f,spde=spde),  #the data stack
+            family= 'gamma',   #which family the data comes from
+            control.predictor=list(A=inla.stack.A(svr_stk_est_f),compute=TRUE),  #compute gives you the marginals of the linear predictor
+            control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+            verbose = T) #can include verbose=TRUE to see the log of the model runs
+## Run Model fit checks 
+mods6 <- list(
+ Model1   = svr_f_mod1,
+ Model2   = svr_f_mod1.2,
+ Model3   = svr_f_mod2,
+ Model4   = svr_f_mod3,
+ Model5   = svr_f_mod4,
+ Model6   = svr_f_mod4.2,
+ Model7   = svr_f_mod5
+)
+
+tbl6 <- data.frame(
+ Model = names(mods6),
+ CPO  = sapply(mods6, \(m) (LPML <- abs(sum(log(m$cpo$cpo), na.rm = TRUE)))),
+ WAIC  = sapply(mods6, \(m) m$waic$waic),
+ DIC   = sapply(mods6, \(m) m$dic$dic),
+ row.names = NULL
+)
+
+print(tbl6<-tbl6[order(tbl6$CPO), ], digits = 2)
+
+write.csv(tbl6, file=paste0(svr_results_path_f, "/svr_cpo_f2.csv"))
+
+```
+
+
+
+
+

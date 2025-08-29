@@ -1,0 +1,267 @@
+---
+title: "BARt"
+author: '35642114'
+date: "2025-05-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(ggpubr)
+library(ggplot2)
+library(knitr)
+library(kableExtra)
+library(tidyr)
+library(dplyr)
+#install.packages("cli")
+library(tidymodels)
+library(glmnet)
+library(janitor)
+library(patchwork)
+library(fairml)
+library(tibble)
+library(palmerpenguins)
+library(discrim)
+library(rpart.plot)
+library(rpart)
+library(vip)
+library(yardstick)
+library(future)
+library(tidymodels)     # parsnip + recipes + tune + workflows
+library(dbarts)         # parsnip::bart() 
+r2oos <- function(d, var) {
+ rmse <- d |> rmse({{var}}, .pred) |> pull(.estimate) 
+# mse <- rmse(d, var, .pred)$.estimate^2
+ riv <- d |> rmse({{var}}, .pred_c) |> pull(.estimate)
+# iv <- rmse(d, var, .pred_c)$.estimate^2 
+ 1 - (rmse * rmse) / (riv * riv)
+}
+
+```
+
+```{r}
+df<-read.csv("mcovs.csv",head=T)
+bart_results_path<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-bart"
+```
+
+```{r}
+#| label: data-preprocessing 
+#| label: test_train_split and recipe
+  set.seed(35642114)
+q2_data <- df  |>
+ clean_names() |>
+  drop_na()
+
+q2_split <- q2_data |> 
+ initial_split(prop = 0.8)
+q2_train <- q2_split |>
+ training()
+q2_test <- q2_split |>
+ testing()
+
+q2_recipe <- recipe(resp ~ ., data = q2_train) 
+
+```
+
+```{r}
+#| label: bart-basic
+set.seed(35642114)
+
+bart_spec <- parsnip::bart(trees = 200)|>
+  set_mode("regression") |>
+  set_engine("dbarts")
+
+bart_wflow <- workflow() |>
+  add_recipe(q2_recipe) |>
+  add_model(bart_spec)
+
+ bart_q2_fit <- fit(bart_wflow, q2_train)
+
+q2_pred <- bart_q2_fit |>
+  augment(q2_test) |>
+  mutate(.pred_c = mean(q2_train$resp))
+
+rmse(q2_pred, resp, .pred)
+rsq (q2_pred, resp, .pred)
+r2oos(q2_pred, resp)
+
+#----------------------------------
+ bart_all_fit <- fit(bart_wflow, q2_data)
+pred_wrapper <- function(object, newdata) {
+  if (inherits(object, "workflow")) {
+    preds <- predict(object, new_data = newdata, type = "numeric")$.pred
+    return(as.vector(preds))
+  }
+  preds <- predict(object, newdata = newdata, type = "ev")
+
+  if (is.matrix(preds)) {
+    preds <- colMeans(preds)
+  }
+
+  return(as.vector(preds))
+}
+
+visp.bart <- vip::vip(
+  object        = extract_fit_parsnip(bart_all_fit),  
+  feature_names = names(dplyr::select(q2_test, -resp)),
+  method        = "permute",
+  train         = dplyr::select(q2_test, -resp),
+  target        = q2_test$resp,
+  pred_wrapper  = pred_wrapper,   
+  metric        = "rsq",
+  nsim          = 20,
+  num_features  = 8,
+  geom          = "point"
+)
+visp.bart
+# 只包含平均重要性
+bart_results_path<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-bart"
+ggsave(filename=paste0(bart_results_path, "/feature/VI.png"), plot = visp.bart, width = 6, height = 4, dpi = 300)
+write.csv(visp.bart$data, file=paste0(bart_results_path, "/feature/VI.csv"))
+
+```
+
+# ################################################### Bayesian
+
+```{r}
+#| label:tuning setup
+
+set.seed(35642114)
+
+bart_tune_spec <- parsnip::bart(
+  trees = tune(),
+  prior_terminal_node_coef = tune(),
+   prior_terminal_node_expo = tune(),
+  prior_outcome_range = tune()
+) |>
+ set_mode("regression") |>
+  set_engine("dbarts")
+
+
+bart_tune_wflow <- workflow() |>
+  add_recipe(q2_recipe) |>
+  add_model(bart_tune_spec)
+
+```
+
+```{r}
+#| label: Bayesian Opt
+plan(multisession, workers = 20)
+set.seed(35642114)
+library(finetune)
+library(dials)
+
+bart_param <-  parameters(
+  trees(),
+  prior_terminal_node_coef(),
+   prior_terminal_node_expo(),
+  prior_outcome_range()
+) %>%
+  update(
+    trees = trees(range = c(550,650)),
+     prior_terminal_node_coef = prior_terminal_node_coef(range = c(0.25, 0.5)),
+     prior_terminal_node_expo = prior_terminal_node_expo(range=c(0.01,2)),
+  prior_outcome_range = prior_outcome_range(range=c(0.6,1.3))
+    
+  )
+
+
+folds <- vfold_cv(q2_train, v = 5)
+
+bayes_bart <- tune_bayes(
+  bart_tune_wflow,
+  resamples = folds,
+  initial = 20  ,# 建立初始surrogate model, 随机抽的参数样本，加上param_info = svm_param指定在这个范围里面抽取
+  iter = 50,  
+  param_info = bart_param,     
+  metrics = metric_set(rmse, rsq),
+  control = control_bayes(verbose = TRUE)
+)
+
+metric<-show_best(bayes_bart, metric = "rsq")
+autoplot<-autoplot(bayes_bart, metric = "rsq") + theme_bw()
+
+
+#autoplot<-ggarrange(autoplot1,autoplot2,
+  #        nrow = 2, ncol = 1)
+
+ggsave(filename=paste0(bart_results_path, "/feature/autoplot.png"), plot = autoplot, width = 6, height = 6, dpi = 300)
+write.csv(metric, file=paste0(bart_results_path, "/feature/metric.csv"))
+
+df <- collect_metrics(bayes_bart) |> filter(.metric == "rsq")
+ggplot(df, aes(x = trees, y = mean)) +
+  geom_point() + geom_smooth(method = "loess")
+ggplot(df, aes(x = trees, y = prior_terminal_node_coef, color = mean)) +
+  geom_point(size = 2) +
+  scale_color_viridis_c()
+
+#iteration
+bayes_bart %>%
+  collect_metrics(summarize = FALSE) %>%
+  filter(.metric %in% c("rmse", "rsq")) %>%
+  ggplot(aes(x = .iter, y = .estimate)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap(~.metric, scales = "free_y") +
+  labs(x = "Iteration", y = "Mean performance", title = "Performance vs Iteration") +
+  theme_bw()
+
+
+BO_bart <- select_best(bayes_bart, metric = "rsq")
+
+default_plan <- plan()
+plan(sequential)
+```
+
+```{r}
+#| label:  Retraining with the optimal hyperparameters combination and VI
+plan(multisession, workers = 20)
+set.seed(35642114)
+
+bart_best_fit <- bart_tune_wflow |>
+ finalize_workflow(BO_bart) |>
+ last_fit(q2_split)
+
+collect_metrics(bart_best_fit) 
+
+pred_df <- collect_predictions(bart_best_fit)
+
+pred_wrapper <- function(object, newdata) {
+  if (inherits(object, "workflow")) {
+    preds <- predict(object, new_data = newdata, type = "numeric")$.pred
+    return(as.vector(preds))
+  }
+  preds <- predict(object, newdata = newdata, type = "ev")
+
+  if (is.matrix(preds)) {
+    preds <- colMeans(preds)
+  }
+
+  return(as.vector(preds))
+}
+
+visp.bart <- vip::vip(
+  object        = extract_fit_parsnip(bart_best_fit),  
+  feature_names = names(dplyr::select(q2_test, -resp)),
+  method        = "permute",
+  train         = dplyr::select(q2_test, -resp),
+  target        = q2_test$resp,
+  pred_wrapper  = pred_wrapper,   
+  metric        = "rsq",
+  nsim          = 20,
+  num_features  = 8,
+  geom          = "point"
+)
+visp.bart
+# 只包含平均重要性
+bart_results_path<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-bart"
+ggsave(filename=paste0(bart_results_path, "/feature/VI.png"), plot = visp.bart, width = 6, height = 4, dpi = 300)
+write.csv(visp.bart$data, file=paste0(bart_results_path, "/feature/VI.csv"))
+
+default_plan <- plan()
+plan(sequential)
+```
+

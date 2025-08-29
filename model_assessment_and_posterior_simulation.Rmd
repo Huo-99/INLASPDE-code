@@ -1,0 +1,3736 @@
+---
+title: "the rest"
+output: html_document
+date: "2025-07-27"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r region prediction}
+regional_est <- function(datr, run)
+{
+  uniR <- unique(reg_names$id)
+  regnames <- unique(reg_names$libelle)
+  outR <- matrix(0, nrow=length(uniR), ncol=6)
+  for(j in uniR)
+  {
+    reg <- datr[datr$CMR_Regions==j,]
+    rtots <- apply(reg[,4:(3+run)], 2, sum, na.rm=T) #col sums
+    rtot_mean  <- mean(rtots, na.rm=T) #/100
+    rtot_sd <- sd(rtots, na.rm=T)
+    rtot_lower <- quantile(rtots, probs=c(0.025))
+    rtot_median <- quantile(rtots, probs=c(0.5))
+    rtot_upper <- quantile(rtots, probs=c(0.975))
+    rtot_uncert <- (rtot_upper - rtot_lower)/rtot_mean
+    
+    restimates <- round(c(rtot_mean,rtot_sd, rtot_lower, rtot_median,rtot_upper, rtot_uncert),2)
+    outR[j,] <- restimates
+  }
+  outR <- data.frame(outR)
+  return(reg_est <- data.frame(id = uniR,
+                               names = regnames,
+                               total = outR[,1],
+                               sd = outR[,2],
+                               lower = outR[,3],
+                               median = outR[,4],
+                               upper = outR[,5],
+                               uncertainty = outR[,6]))
+}
+
+```
+
+```{r mapping preparation}
+library(fields)
+xy      <- gproj$lattice$loc
+xy.in   <- inout(xy, bb)
+loc_pred <- xy[xy.in, , drop = FALSE]
+A_pred <- gproj$proj$A[xy.in, ]
+coords_obs <- coords
+
+# Thin-Plate Splines interpolating
+fit_x1  <- Tps(x = coords_obs, Y = dat$x1)
+fit_x2  <- Tps(x = coords_obs, Y = dat$x2)
+fit_x3  <- Tps(x = coords_obs, Y = dat$x3)
+fit_x6  <- Tps(x = coords_obs, Y = dat$x6)
+fit_x7  <- Tps(x = coords_obs, Y = dat$x7)
+fit_x9  <- Tps(x = coords_obs, Y = dat$x9)
+fit_x11  <- Tps(x = coords_obs, Y = dat$x11)
+fit_x12  <- Tps(x = coords_obs, Y = dat$x12)
+fit_x13  <- Tps(x = coords_obs, Y = dat$x13)
+fit_x14  <- Tps(x = coords_obs, Y = dat$x14)
+fit_x15  <- Tps(x = coords_obs, Y = dat$x15)
+fit_x16  <- Tps(x = coords_obs, Y = dat$x16)
+fit_x17  <- Tps(x = coords_obs, Y = dat$x17)
+fit_x21  <- Tps(x = coords_obs, Y = dat$x21)
+fit_x24  <- Tps(x = coords_obs, Y = dat$x24)
+fit_x25  <- Tps(x = coords_obs, Y = dat$x25)
+fit_x32  <- Tps(x = coords_obs, Y = dat$x32)
+fit_x34  <- Tps(x = coords_obs, Y = dat$x34)
+fit_x40  <- Tps(x = coords_obs, Y = dat$x40)
+fit_x42  <- Tps(x = coords_obs, Y = dat$x42)
+fit_x43  <- Tps(x = coords_obs, Y = dat$x43)
+
+x1_vec  <- predict(fit_x1, loc_pred)
+x2_vec  <- predict(fit_x2, loc_pred)
+x3_vec  <- predict(fit_x3, loc_pred)
+x6_vec  <- predict(fit_x6, loc_pred)
+x7_vec  <- predict(fit_x7, loc_pred)
+x9_vec  <- predict(fit_x9, loc_pred)
+x11_vec  <- predict(fit_x11, loc_pred)
+x12_vec  <- predict(fit_x12, loc_pred)
+x13_vec  <- predict(fit_x13, loc_pred)
+x14_vec  <- predict(fit_x14, loc_pred)
+x15_vec  <- predict(fit_x15, loc_pred)
+x16_vec  <- predict(fit_x16, loc_pred)
+x17_vec  <- predict(fit_x17, loc_pred)
+x21_vec  <- predict(fit_x21, loc_pred)
+x24_vec  <- predict(fit_x24, loc_pred)
+x25_vec  <- predict(fit_x25, loc_pred)
+x32_vec  <- predict(fit_x32, loc_pred)
+x34_vec  <- predict(fit_x34, loc_pred)
+x40_vec  <- predict(fit_x40, loc_pred)
+x42_vec  <- predict(fit_x42, loc_pred)
+x43_vec  <- predict(fit_x43, loc_pred)
+
+```
+
+# ---------------------------------------------stepwise-backward
+```{r}
+mod<-mod5
+form <- form5
+```
+
+```{r post and spatial.field}
+#-- extract the posterior ~ of the fixed effects for best model----
+#fixed.effects <- round(mod$summary.fixed,4); fixed.effects; mod$summary.hyperpar
+write.csv(mod$summary.fixed, file=paste0(results_path_b, "/post.fixed.effects.csv"))
+write.csv(mod$summary.hyperpar, file=paste0(results_path_b, "/post.hyperpar.csv"))
+
+##---------------------posterior spatial field
+## Remove points not in the study domain
+g.mean <- inla.mesh.project(gproj, mod$summary.random$spatial.field$mean)
+g.sd <- inla.mesh.project(gproj, mod$summary.random$spatial.field$sd)
+
+g.mean[!xy.in] <- g.sd[!xy.in] <- NA
+#install.packages("gridExtra")
+library(gridExtra)
+library(ggplot2)
+library(viridisLite)
+col <- viridis(100)
+#install.packages("lattice")   
+library(lattice)         
+spatial.field<-grid.arrange(levelplot(g.mean, scales=list(draw=F), 
+                       xlab='', ylab='', cex.lab=2, 
+                       main='Spatial field Mean',col.regions = col),
+             levelplot(g.sd, scal=list(draw=F), xla='', 
+                       yla='', main='Spatial field SD',
+                       col.regions = col), nrow=1)
+ggsave(filename=paste0(results_path_b, "/spatial.field1.png"), plot = spatial.field, width = 6, height = 4, dpi = 300)
+
+
+##------------------------------------posterior dens-----------------
+covars_pred <- data.frame(
+  Intercept = 1,
+  x2 = x2_vec, x3 = x3_vec, x17 =x17_vec, x21 = x21_vec, x32 = x32_vec, x34 = x34_vec, x40 = x40_vec, x42 = x42_vec
+)
+
+stk_pred <- inla.stack(
+  data    = list(y = NA),
+  A       = list(A_pred, 1),
+ effects = list(
+  spatial.field = iset$spatial.field,covars_pred),
+  #list(c(list(Intercept=1),  iset),  list(covars_pred) ),
+  tag     = "pred"
+)
+
+stk_all <- inla.stack(stk_est, stk_pred)
+mod_pred <- inla(form,
+  data = inla.stack.data(stk_all, spde = spde),
+  family = "gamma",
+  control.predictor = list(A = inla.stack.A(stk_all), compute = TRUE),
+  control.mode = list(theta = mod$mode$theta, restart = FALSE),
+  verbose = T
+)
+id_pred  <- inla.stack.index(stk_all, "pred")$data
+
+yhat_mean <- mod_pred$summary.fitted.values$mean[id_pred]  
+yhat_sd   <- mod_pred$summary.fitted.values$sd[id_pred]    
+#yhat_low  <- mod_pred$summary.fitted.values$`0.025quant`[id_pred]
+#yhat_high <- mod_pred$summary.fitted.values$`0.975quant`[id_pred]
+
+nx <- length(gproj$x); ny <- length(gproj$y)
+
+yhat_mean_grid <- matrix(NA_real_, nx, ny)
+yhat_sd_grid   <- matrix(NA_real_, nx, ny)
+yhat_low_grid  <- matrix(NA_real_, nx, ny)
+yhat_high_grid <- matrix(NA_real_, nx, ny)
+
+yhat_mean_grid[xy.in] <- yhat_mean
+yhat_sd_grid[xy.in]   <- yhat_sd
+#yhat_low_grid[xy.in]  <- yhat_low
+#yhat_high_grid[xy.in] <- yhat_high
+
+
+library(gridExtra)
+library(viridis)
+
+plt_mean <- levelplot(yhat_mean_grid,
+                      col.regions = inferno(200),
+                      scales = list(draw = FALSE),
+                      xlab = "", ylab = "",
+                      main = "Density Mean")
+
+plt_sd <- levelplot(yhat_sd_grid,
+                    col.regions = inferno(200),
+                    scales = list(draw = FALSE),
+                    xlab = "", ylab = "",
+                    main = "Density SD")
+
+dens.map<- gridExtra::grid.arrange(plt_mean, plt_sd, nrow = 1)
+ggsave(filename=paste0(results_path_b, "/dens.map1.png"), plot = dens.map, width = 6, height = 4, dpi = 300)
+
+
+```
+
+```{r CV}
+#| label: CV for spatial model
+cross_validate <- function(dat, n.folds, mod, form, A, seed)
+{
+  N <- nrow(dat)
+  table(ind_train <- factor(sample(x = rep(1:n.folds, each = floor(N / n.folds)),  # Sample IDs for training data
+                                   size = N)))
+  
+  table(as.numeric(ind_train)) 
+  dat$k_fold <- as.numeric(ind_train)
+  coords = cbind(dat$lon, dat$lat)
+  
+  k_uniq <-sort(unique(dat$k_fold))
+  
+  
+  #---------------------------------------------------------------
+  #                   in-sample
+  #---------------------------------------------------------------
+  
+  met_list_in <- list()
+  pred_list_in <- list()
+  for(i in 1:length(k_uniq))
+  {
+    
+    print(paste0("in-sample cross-validation using fold ", i, sep=""))
+    test_ind <- which(dat$k_fold==k_uniq[i])
+    dim(test <- dat[test_ind, ]) #---test set for fold i
+    
+    
+    train_coords <- coords
+    test_coords <- coords[test_ind,]
+    
+    ##--------mean --------------------------------------------------------
+    # spatial random effects based on the full data best model
+    sfield_nodes_mean <- mod$summary.random$spatial.field['mean']
+    field_mean <- (A%*% as.data.frame(sfield_nodes_mean)[, 1])# 2290 × 534 projection matrix * spatial autocorrelation term
+    #dim(A);dim(as.data.frame(sfield_nodes_mean))
+    fixed <-  
+     mod$summary.fixed['Intercept', 'mean'] +
+     mod$summary.fixed['x2', 'mean'] * test[,'x2'] +
+     mod$summary.fixed['x3', 'mean'] * test[,'x3'] +
+     mod$summary.fixed['x17', 'mean'] * test[,'x17'] +
+     mod$summary.fixed['x21', 'mean'] * test[,'x21'] +
+     mod$summary.fixed['x32', 'mean'] * test[,'x32'] +
+     mod$summary.fixed['x34', 'mean'] * test[,'x34'] + 
+     mod$summary.fixed['x40', 'mean'] * test[,'x40']  +
+     mod$summary.fixed['x42', 'mean'] * test[,'x42'] +
+      rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "mean"])) + #---source random effect
+      rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "mean"])) + #---settlement type and region nested effects 
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "mean"])) + #---set-type random effect
+       rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "mean"])) + #---region random effect
+     
+      mod$summary.random$IDsr['mean'][test_ind,1] + #--uncorrelated spatial random effect
+    
+      field_mean[test_ind,1]# the contribution of spatial field
+    
+       dens_ht <- exp(fixed)
+       sum(pop_ht <- dens_ht*test$bld)
+    
+    
+    
+    #### LOWER---------------------------------
+      # spatial random effects based on the full data best model
+       sfield_nodes_lower <- mod$summary.random$spatial.field['0.025quant']
+       field_lower <- (A%*% as.data.frame(sfield_nodes_lower)[, 1])
+       
+    fixedL <-  
+      mod$summary.fixed['Intercept', '0.025quant'] +
+      mod$summary.fixed['x2', '0.025quant'] * test[,'x2'] +
+      mod$summary.fixed['x3', '0.025quant'] * test[,'x3'] +
+      mod$summary.fixed['x17', '0.025quant'] * test[,'x17'] +
+      mod$summary.fixed['x21', '0.025quant'] * test[,'x21'] +
+      mod$summary.fixed['x32', '0.025quant'] * test[,'x32'] +
+      mod$summary.fixed['x34', '0.025quant'] * test[,'x34'] + 
+      mod$summary.fixed['x40', '0.025quant'] * test[,'x40']  +
+      mod$summary.fixed['x42', '0.025quant'] * test[,'x42'] +
+      
+     
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "0.025quant"])) + #---source random effect
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "0.025quant"])) + #---settlement type and region nested effects 
+   rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "0.025quant"])) + #---set-type random effect
+       rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "0.025quant"])) + #---region random effect
+      
+      mod$summary.random$IDsr['0.025quant'][test_ind,1] + #--uncorrelated spatial random effects
+    
+      field_lower[test_ind,1]
+       
+      dens_htL <- exp(fixedL)
+      pop_htL <- dens_htL*test$bld
+    
+    
+    ### upper ---------------------------------------------
+      
+      # spatial random effects based on the full data best model
+      sfield_nodes_upper <- mod$summary.random$spatial.field['0.975quant']
+      field_upper <- (A%*% as.data.frame(sfield_nodes_upper)[, 1])
+      
+      fixedU <-  
+        mod$summary.fixed['Intercept', '0.975quant'] +
+        mod$summary.fixed['x2', '0.975quant'] * test[,'x2'] +
+        mod$summary.fixed['x3', '0.975quant'] * test[,'x3'] +
+        mod$summary.fixed['x17', '0.975quant'] * test[,'x17'] +
+        mod$summary.fixed['x21', '0.975quant'] * test[,'x21'] +
+        mod$summary.fixed['x32', '0.975quant'] * test[,'x32'] +
+        mod$summary.fixed['x34', '0.975quant'] * test[,'x34'] + 
+        mod$summary.fixed['x40', '0.975quant'] * test[,'x40']  +
+        mod$summary.fixed['x42', '0.975quant'] * test[,'x42'] +
+        
+       
+       rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "0.975quant"])) + #---source random effect
+       rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "0.975quant"])) + #---settlement type and region nested effects 
+       rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "0.975quant"])) + #---set-type random effect
+       rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "0.975quant"])) + #---region random effect
+        
+        mod$summary.random$IDsr['0.975quant'][test_ind,1] + #--uncorrelated spatial random effects
+
+      field_upper[test_ind,1]
+      
+      dens_htU <- exp(fixedU)
+      pop_htU <- dens_htU*test$bld
+    
+    
+    # calculate fit metrics
+    met_in <- mod_metrics2(test$pop,  
+                           pop_ht)
+    
+    met_list_in[[i]]<- unlist(met_in)
+    pred_list_in[[i]] <- data.frame(obs = test$obs, pred = pop_ht,
+                                    lower = pop_htL,
+                                    upper = pop_htU,
+                                    fold = rep(i, length(test$obs)),
+                                    data = rep("insample", length(test$obs)))
+  }
+  met_list_in_dat <- do.call(rbind,met_list_in) # y , fitted y
+  metrics_in <- apply(met_list_in_dat, 2, mean) #
+  pred_list_in_dat <- do.call(rbind,pred_list_in) # y ,fitted y , lower, upper,fold
+  
+  #-----------------------------------------------------------
+  #               out - of -sample
+  #-----------------------------------------------------------
+  met_list_out <- list()
+  pred_list_out <- list()
+  for(i in 1:length(k_uniq))
+  {
+    
+    print(paste0("out-of-sample cross-validation using fold ", i, sep=""))
+    train_ind <- which(dat$k_fold!=k_uniq[i])
+    test_ind <- which(dat$k_fold==k_uniq[i])
+    dim(train <- dat[train_ind, ])#---train set for fold i
+    dim(test <- dat[test_ind, ]) #---test set for fold i
+    
+    
+    train_coords <- coords[train_ind,]
+    test_coords <- coords[test_ind,]
+    
+    
+    ###---Create projection matrices for training and testing datasets
+    Ae<-inla.spde.make.A(mesh=mesh,loc=as.matrix(train_coords));dim(Ae) #training
+    
+    
+    #####------------------------
+    covars_train <- train[,c("x2", "x3", "x17", "x21", "x32", "x34", "x40",
+                             "x42","set_reg", "source","IDsr","set_typ","region")]; dim(covars_train)#
+    stk_train <- inla.stack(data=list(y=train$dens), #the response
+                            
+                            A=list(Ae,1),  #the A matrix; the 1 is included to make the list(covariates)
+                            
+                            effects=list(c(list(Intercept=1), #the Intercept
+                                           iset),  #the spatial index
+                                         #the covariates
+                                         list(covars_train)
+                            ), 
+                            tag='train')
+    
+    
+    ###---Rerun INLA for model test prediction
+    model <-inla(form, #the formula
+                 data=inla.stack.data(stk_train,spde=spde),  #the data stack
+                 family= 'gamma',   #which family the data comes from
+                 control.predictor=list(A=inla.stack.A(stk_train),compute=TRUE),  #compute gives you the marginals of the linear predictor
+                 control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+                 verbose = T) #can include verbose=TRUE to see the log of the model runs
+    summary(model)
+    
+    
+    ##--------mean --------------------------------------------------------
+    # spatial random effects based on the full data best model
+    sfield_nodes_mean <- model$summary.random$spatial.field['mean']
+    field_mean <- (A%*% as.data.frame(sfield_nodes_mean)[, 1])
+    
+    fixed <-  
+      model$summary.fixed['Intercept', 'mean'] +
+      model$summary.fixed['x2', 'mean'] * test[,'x2'] +
+      model$summary.fixed['x3', 'mean'] * test[,'x3'] +
+      model$summary.fixed['x17', 'mean'] * test[,'x17'] +
+      model$summary.fixed['x21', 'mean'] * test[,'x21'] +
+      model$summary.fixed['x32', 'mean'] * test[,'x32'] +
+      model$summary.fixed['x34', 'mean'] * test[,'x34'] + 
+      model$summary.fixed['x40', 'mean'] * test[,'x40']  +
+      model$summary.fixed['x42', 'mean'] * test[,'x42'] +
+      
+     rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for source", "mean"])) + #---source random effect
+     rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for set_reg", "mean"])) + #---settlement type and region nested effects 
+     rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for set_typ", "mean"])) + #---set-type random effect
+     rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for region", "mean"])) + #---region random effect
+      
+      mod$summary.random$IDsr['mean'][test_ind,1] + #--uncorrelated spatial random effects
+
+    field_mean[test_ind,1]
+    
+    dens_ht <- exp(fixed)
+    sum(pop_ht <- dens_ht*test$bld)
+    
+    
+    
+    #### LOWER---------------------------------
+    
+    # spatial random effects based on the full data best model
+    sfield_nodes_lower <- model$summary.random$spatial.field['0.025quant']
+    field_lower <- (A%*% as.data.frame(sfield_nodes_lower)[, 1])
+    
+    fixedL <-  
+      model$summary.fixed['Intercept', '0.025quant'] +
+      model$summary.fixed['x2', '0.025quant'] * test[,'x2'] +
+      model$summary.fixed['x3', '0.025quant'] * test[,'x3'] +
+      model$summary.fixed['x17', '0.025quant'] * test[,'x17'] +
+      model$summary.fixed['x21', '0.025quant'] * test[,'x21'] +
+      model$summary.fixed['x32', '0.025quant'] * test[,'x32'] +
+      model$summary.fixed['x34', '0.025quant'] * test[,'x34'] + 
+      model$summary.fixed['x40', '0.025quant'] * test[,'x40']  +
+      model$summary.fixed['x42', '0.025quant'] * test[,'x42'] +
+     
+     rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for source", "0.025quant"])) + #---source random effect
+     rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for set_reg", "0.025quant"])) + #---settlement type and region nested effects 
+     rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for set_typ", "0.025quant"])) + #---set-type random effect
+     rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for region", "0.025quant"])) + #---region random effect
+      
+      mod$summary.random$IDsr['0.025quant'][test_ind,1] + #--uncorrelated spatial random effects
+ 
+    field_lower[test_ind,1]
+    
+    dens_htL <- exp(fixedL)
+    pop_htL <- dens_htL*test$bld
+    
+    
+    
+    ### upper ---------------------------------------------
+    
+    # spatial random effects based on the full data best model
+    sfield_nodes_upper <- model$summary.random$spatial.field['0.975quant']
+    field_upper <- (A%*% as.data.frame(sfield_nodes_upper)[, 1])
+    
+    
+    fixedU <-  
+      model$summary.fixed['Intercept', '0.975quant'] +
+      model$summary.fixed['x2', '0.975quant'] * test[,'x2'] +
+      model$summary.fixed['x3', '0.975quant'] * test[,'x3'] +
+      model$summary.fixed['x17', '0.975quant'] * test[,'x17'] +
+      model$summary.fixed['x21', '0.975quant'] * test[,'x21'] +
+      model$summary.fixed['x32', '0.975quant'] * test[,'x32'] +
+      model$summary.fixed['x34', '0.975quant'] * test[,'x34'] + 
+      model$summary.fixed['x40', '0.975quant'] * test[,'x40']  +
+      model$summary.fixed['x42', '0.975quant'] * test[,'x42'] +
+     
+     rnorm(nrow(test), 0, 1/sqrt(model$summary.hyperpar["Precision for source", "0.975quant"])) + #---source random effect
+     rnorm(nrow(test), 0, 1/sqrt(model$summary.hyperpar["Precision for set_reg", "0.975quant"])) + #---interaction
+     rnorm(nrow(test), 0, 1/sqrt(model$summary.hyperpar["Precision for set_typ", "0.975quant"])) + #---set-type random effect
+     rnorm(nrow(test), 0, 1/sqrt(model$summary.hyperpar["Precision for region", "0.975quant"])) + #---region random effect
+     
+      mod$summary.random$IDsr['0.975quant'][test_ind,1] + #--uncorrelated spatial random effects
+
+    field_upper[test_ind,1]
+    
+    dens_htU <- exp(fixedU)
+    pop_htU <- dens_htU*test$bld
+    
+    # calculate fit metrics
+    met_out <- mod_metrics2(test$pop,  
+                            pop_ht)
+    
+    met_list_out[[i]]<- unlist(met_out)
+    pred_list_out[[i]] <- data.frame(obs = test$obs, pred = pop_ht,
+                                     lower = pop_htL,
+                                     upper = pop_htU,
+                                     fold = rep(i, length(test$obs)),
+                                     data = rep("outsample", length(test$obs)))
+  }
+  met_list_out_dat <- do.call(rbind,met_list_out)
+  metrics_out <- apply(met_list_out_dat, 2, mean) # fit metrics
+  
+  pred_list_out_dat <- do.call(rbind,pred_list_out)# predictions
+  
+  cv_mets <- rbind(metrics_in, metrics_out)
+  output <- list( met_list_in_dat = met_list_in_dat,
+                  met_list_out_dat = met_list_out_dat,
+                  pred_dat = rbind(pred_list_in_dat, pred_list_out_dat),
+                  cv_metrics = rbind(metrics_in, metrics_out))
+}
+
+dat <- dat
+dat$obs <- dat$Imputed_LHHSIZE # observed household size
+
+(cross_val <- cross_validate(dat, n.folds = 5, 
+                             mod = mod, 
+                             form = form,
+                             A, 
+                             seed = 35642114))
+
+#cross_val$met_list_in_dat  # in-sample metrics per fold 
+#cross_val$met_list_out_dat  # out-of-sample metrics per fold
+cross_val$cv_metrics    # combined averaged metrics
+cross_val$pred_dat  # combined prediction data
+dim(cross_val$pred_dat)
+
+(cross_metrics1 <- rbind(cross_val$met_list_in_dat,cross_val$met_list_out_dat))
+write.csv(cross_metrics1, file=paste0(results_path_b, "/step.folds.b.csv"))
+
+```
+
+```{r visualize}
+#-- Scatterplots of spatial model cross-validation results----
+pred.data <- cross_val$pred_dat
+pred.data$fold<-factor(pred.data$fold)
+pred.data$data <- factor(pred.data$data,
+                         levels = c("insample", "outsample"),
+                         labels = c("In-Sample", "Out-of-Sample"))
+write.csv(pred.data, file=paste0(results_path_b, "/pre.data.csv"))
+
+#ggsave(filename=paste0(results_path_b, "/spatial.cv.png"), plot = spatial.cv, width = 6, height = 6, dpi = 300)
+
+```
+
+```{r fine prediction}
+#-- for spatial model----
+sim_spatial <- function(model, dat, Aprediction, run, inla.seed)
+{
+  fixedeff <- dens_hat <- pop_hat <- matrix(0, nrow=nrow(dat), ncol = run)
+
+  m1.samp <- inla.posterior.sample(run, model, 
+                                   seed = inla.seed, 
+                                   selection=list(x2 = 1, 
+                                                  x3 = 1, 
+                                                  x17 = 1, 
+                                                  x21 = 1,
+                                                  x32 = 1,
+                                                  x34 = 1,
+                                                  x40 = 1, 
+                                                  x42 = 1),
+                                   num.threads="1:1")
+  
+  sfield_nodes_mean <- model$summary.random$spatial.field['mean']
+  field_mean <- (Apred%*% as.data.frame(sfield_nodes_mean)[, 1])
+  for(i in 1:run)
+  {
+    fixedeff[,i] <- 
+      model$summary.fixed['Intercept', 'mean'] +
+      m1.samp[[i]]$latent[1,] * dat[,'x2']  +
+      m1.samp[[i]]$latent[2,] * dat[,'x3']  +
+      m1.samp[[i]]$latent[3,] * dat[,'x17'] +
+      m1.samp[[i]]$latent[4,] * dat[,'x21'] +
+      m1.samp[[i]]$latent[5,] * dat[,'x32'] + 
+      m1.samp[[i]]$latent[6,] * dat[,'x34'] +
+      m1.samp[[i]]$latent[7,] * dat[,'x40'] +
+      m1.samp[[i]]$latent[8,] * dat[,'x42'] +
+      
+     rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for IDsr"])) +
+     rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for source"])) +
+     rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for set_reg"])) + #---settlement type and region nested effects 
+     rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for set_typ"])) + #---set-type random effect
+     rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for region"])) + #---region random effect 
+     
+      field_mean[,1]
+    
+    
+    dens_hat[,i] <- exp(fixedeff[,i])
+    pop_hat[,i] <- dens_hat[,i]*dat$bld
+    
+  }
+  dat$mean_dens_hat <- apply(dens_hat, 1, mean, na.rm=T) 
+  dat$mean_pop_hat  <- apply(pop_hat, 1, mean, na.rm=T) #
+  dat$lower_pop_hat <- apply(pop_hat, 1, quantile, probs=c(0.025), na.rm=T) #
+  dat$upper_pop_hat <- apply(pop_hat, 1, quantile, probs=c(0.975), na.rm=T) #
+  dat$sd_pop_hat <- apply(pop_hat, 1, sd, na.rm=T) #
+  dat$cv <- dat$sd_pop_hat/dat$mean_pop_hat#
+  
+  output <- list(pop_hat = pop_hat,
+                 est_data = dat)
+}
+#------------
+run=100
+inla.seed = 35642114
+data$bld <- data$CMR_buildings_count
+
+system.time(str(sim.spat <- sim_spatial(mod,data,Apred,run,inla.seed))) # spatial
+
+sum(sim.spat$est_dat$mean_pop_hat,na.rm=T)
+#  Join the posterior sample to the prediction data
+names(data)
+data.sim <- data.frame(cbind(data[,c("CMR_Regions", "CMR_Department","CMR_Settlement_Classification")], sim.spat$pop_hat))
+write.csv(data.sim, file=paste0(results_path_b, "/estimates/data.sim.csv"))
+```
+
+```{r Region  estimates}
+(regional.est <- regional_est(data.sim, 100))
+sum(regional.est$total)
+regional.est$method <- rep("Proposed", nrow(regional.est))
+
+write.csv(regional.est, file=paste0(results_path_b, "/estimates/regional_final.csv"))
+```
+
+```{r region  Errorplots}
+#regional.est<-read.csv(file.path(results_path_b,"/estimates/regional_final.csv"))
+regional.est$total2 <- round(regional.est$total/1000)
+regional.est$lower2 <- round(regional.est$lower/1000)
+regional.est$upper2 <- round(regional.est$upper/1000)
+
+pd <- ggplot(regional.est, aes(x=reorder(names, -total), 
+                      y=total2))+
+  geom_errorbar(aes(ymin = lower2, ymax = upper2),
+                position = position_dodge(width = 0.4), width = 0.4,
+                linewidth=0.9)+
+  geom_point(size = 2, color = "red", alpha=0.9) +
+  theme_bw()#+
+  #coord_flip() 
+  
+library(ggpubr)
+library(ggplot2)
+pdh <- ggpar(pd, ylab="Estimated population count ('000)", xlab="Region",
+              legend = "none", legend.title = "Region:",
+              font.legend=c(14),
+              # font.label = list(size = 12, face = "bold", color ="red"),
+              #palette = "pnj",
+              font.x = c(14),
+              font.y = c(14),
+              font.main=c(14),
+              font.xtickslab =c(12),
+               font.ytickslab =c(14),
+              xtickslab.rt = 45)
+
+
+pdh
+ggsave(filename=paste0(results_path_b, "/estimates/regional.est.png"), plot = pdh, width = 6, height = 6, dpi = 300)
+#-----------------------------------------------------no y label
+pd.1 <- ggplot(regional.est, aes(x=reorder(names, -total), 
+                      y=total2))+
+  geom_errorbar(aes(ymin = lower2, ymax = upper2),
+                position = position_dodge(width = 0.4), width = 0.4,
+                linewidth=0.9)+
+  geom_point(size = 2, color = "red", alpha=0.9) +
+  scale_y_continuous(labels=NULL)+
+  theme_bw()#+
+  #coord_flip() 
+  
+library(ggpubr)
+library(ggplot2)
+pdh.1 <- ggpar(pd.1, ylab="Estimated population count ('000)", xlab="Region",
+              legend = "none", legend.title = "Region:",
+              font.legend=c(14),
+              # font.label = list(size = 12, face = "bold", color ="red"),
+              #palette = "pnj",
+              font.x = c(14),
+              font.y = c(14),
+              font.main=c(14),
+              font.xtickslab =c(12),
+               font.ytickslab =c(14),
+              xtickslab.rt = 45)
+
+
+pdh.1
+ggsave(filename=paste0(results_path_b, "/estimates/regional.est.noy1.png"), plot = pdh.1, width = 6, height = 6, dpi = 300)
+
+
+```
+
+```{r region  modelled-projected}
+#write.csv(df, file=paste0(results_path_b, "/estimates/df.csv"))
+#---Compare the projected regional estimates with the modelled---
+library(scales)
+theme_set(theme_classic())
+# prepare the data
+ddf<-df
+names(ddf)
+ddf$NIS.Projected<- ddf$NIS.Projected/1000
+#ddf$total <- ddf$total/1000
+ddf$total <- regional.est$total/1000
+
+# Projected 
+ddf1 <- ddf[,c("names", "NIS.Projected")]
+ddf1$Method <- rep("Projected", nrow(ddf1))
+colnames(ddf1) <- c("Region", "Estimate", "Method")
+
+# Modelled 
+ddf2 <- ddf[,c("names", "total")]
+ddf2$Method <- rep("Modelled", nrow(ddf2))
+colnames(ddf2) <- c("Region", "Estimate", "Method")
+
+# combined
+ddf3 <- rbind(ddf1, ddf2)
+ddf3$Method <- factor(ddf3$Method, levels = c("Projected", "Modelled"))
+write.csv(ddf3, file=paste0(results_path_b, "/estimates/modelled.projected.csv"))
+```
+
+# ---------------------------------------------stepwise-forward
+
+```{r}
+mod_f<-mod_f4.2
+form_f <- form_f4.2
+```
+
+```{r posterior and spatial.field}
+#-- extract the posterior ~ of the fixed effects for best model----
+write.csv(mod_f$summary.fixed, file=paste0(results_path_f, "/post.fixed.effects.csv"))
+write.csv(mod_f$summary.hyperpar, file=paste0(results_path_f, "/post.hyperpar.csv"))
+
+## Remove points not in the study domain
+g.mean <- inla.mesh.project(gproj, mod_f$summary.random$spatial.field$mean)
+g.sd <- inla.mesh.project(gproj, mod_f$summary.random$spatial.field$sd)
+g.mean[!xy.in] <- g.sd[!xy.in] <- NA
+
+library(viridisLite)
+col <- viridis(100)
+spatial.field<-grid.arrange(levelplot(g.mean, scales=list(draw=F), 
+                       xlab='', ylab='', cex.lab=2, 
+                       main='Spatial field Mean',col.regions = col),
+             levelplot(g.sd, scal=list(draw=F), xla='', 
+                       yla='', main='Saptial field SD',
+                       col.regions = col), nrow=1)
+ggsave(filename=paste0(results_path_f, "/spatial.field2.png"), plot = spatial.field, width = 6, height = 4, dpi = 300)
+
+##------------------------------------------
+##------------------------------------posterior dens-----------------
+#x6 +  x17 + x21 + x32 + x34 + x42
+
+covars_pred_f  <- data.frame(
+  Intercept = 1,
+  x6 = x6_vec, x17 =x17_vec, x21 = x21_vec, x32 = x32_vec, x34 = x34_vec, x42 = x42_vec
+)
+
+stk_pred_f  <- inla.stack(
+  data    = list(y = NA),
+  A       = list(A_pred, 1),
+ effects = list(
+  spatial.field = iset$spatial.field,covars_pred_f),
+  #list(c(list(Intercept=1),  iset),  list(covars_pred) ),
+  tag     = "pred"
+)
+
+stk_all_f  <- inla.stack(stk_est_f , stk_pred_f )
+mod_pred_f  <- inla(form_f,
+  data = inla.stack.data(stk_all_f , spde = spde),
+  family = "gamma",
+  control.predictor = list(A = inla.stack.A(stk_all_f ), compute = TRUE),
+  control.mode = list(theta = mod_f $mode$theta, restart = FALSE),
+  verbose = T
+)
+id_pred  <- inla.stack.index(stk_all_f , "pred")$data
+
+yhat_mean <- mod_pred_f$summary.fitted.values$mean[id_pred]  
+yhat_sd   <- mod_pred_f$summary.fitted.values$sd[id_pred]   
+#yhat_low  <- mod_pred_f$summary.fitted.values$`0.025quant`[id_pred]
+#yhat_high <- mod_pred_f$summary.fitted.values$`0.975quant`[id_pred]
+
+nx <- length(gproj$x); ny <- length(gproj$y)
+
+yhat_mean_grid <- matrix(NA_real_, nx, ny)
+yhat_sd_grid   <- matrix(NA_real_, nx, ny)
+#yhat_low_grid  <- matrix(NA_real_, nx, ny)
+#yhat_high_grid <- matrix(NA_real_, nx, ny)
+
+yhat_mean_grid[xy.in] <- yhat_mean
+yhat_sd_grid[xy.in]   <- yhat_sd
+#yhat_low_grid[xy.in]  <- yhat_low
+#yhat_high_grid[xy.in] <- yhat_high
+
+
+library(gridExtra)
+library(viridis)
+
+plt_mean <- levelplot(yhat_mean_grid,
+                      col.regions = inferno(200),
+                      scales = list(draw = FALSE),
+                      xlab = "", ylab = "",
+                      main = "Density Mean")
+
+plt_sd <- levelplot(yhat_sd_grid,
+                    col.regions = inferno(200),
+                    scales = list(draw = FALSE),
+                    xlab = "", ylab = "",
+                    main = "Density SD")
+
+dens.map<- gridExtra::grid.arrange(plt_mean, plt_sd, nrow = 1)
+ggsave(filename=paste0(results_path_f, "/dens.map2.png"), plot = dens.map, width = 6, height = 4, dpi = 300)
+
+
+
+```
+
+```{r CV}
+#-- CV for spatial model-----
+cross_validate_f <- function(dat, n.folds, mod, form, A, seed)
+{
+
+  N <- nrow(dat)
+  table(ind_train <- factor(sample(x = rep(1:n.folds, each = floor(N / n.folds)),  # Sample IDs for training data
+                                   size = N)))
+  
+  table(as.numeric(ind_train)) 
+  dat$k_fold <- as.numeric(ind_train)
+  coords = cbind(dat$lon, dat$lat)
+  
+  k_uniq <-sort(unique(dat$k_fold))
+  
+  
+  #---------------------------------------------------------------
+  #                   in-sample
+  #---------------------------------------------------------------
+  
+  met_list_in <- list()
+  pred_list_in <- list()
+  for(i in 1:length(k_uniq))
+  {
+    
+    print(paste0("in-sample cross-validation using fold ", i, sep=""))
+    test_ind <- which(dat$k_fold==k_uniq[i])
+    dim(test <- dat[test_ind, ]) #---test set for fold i
+    
+  #   x6 +  x17 + x21 + x32 + x34 + x42
+    
+    train_coords <- coords
+    test_coords <- coords[test_ind,]
+    
+    ##--------mean --------------------------------------------------------
+    # spatial random effects based on the full data best model
+    sfield_nodes_mean <- mod$summary.random$spatial.field['mean']
+    field_mean <- (A%*% as.data.frame(sfield_nodes_mean)[, 1])# 2290 × 534 projection matrix * spatial autocorrelation term
+    #dim(A);dim(as.data.frame(sfield_nodes_mean))
+    fixed <-  
+     mod$summary.fixed['Intercept', 'mean'] +
+    # mod$summary.fixed['x2', 'mean'] * test[,'x2'] +
+     mod$summary.fixed['x6', 'mean'] * test[,'x6'] +
+     mod$summary.fixed['x17', 'mean'] * test[,'x17'] +
+     mod$summary.fixed['x21', 'mean'] * test[,'x21'] +
+     mod$summary.fixed['x32', 'mean'] * test[,'x32'] +
+     mod$summary.fixed['x34', 'mean'] * test[,'x34'] + 
+    # mod$summary.fixed['x40', 'mean'] * test[,'x40']  +
+     mod$summary.fixed['x42', 'mean'] * test[,'x42'] +
+      rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "mean"])) + #---source random effect
+      rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "mean"])) + #---settlement type and region nested effects 
+       #rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "mean"])) + #---set-type random effect
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "mean"])) + #---region random effect
+     
+      mod$summary.random$IDsr['mean'][test_ind,1] + #--uncorrelated spatial random effect
+    
+      field_mean[test_ind,1]# the contribution of spatial field
+    
+       dens_ht <- exp(fixed)
+       sum(pop_ht <- dens_ht*test$bld)
+    
+    
+    
+    #### LOWER---------------------------------
+      # spatial random effects based on the full data best model
+       sfield_nodes_lower <- mod$summary.random$spatial.field['0.025quant']
+       field_lower <- (A%*% as.data.frame(sfield_nodes_lower)[, 1])
+       
+    fixedL <-  
+      mod$summary.fixed['Intercept', '0.025quant'] +
+     # mod$summary.fixed['x2', '0.025quant'] * test[,'x2'] +
+      mod$summary.fixed['x6', '0.025quant'] * test[,'x6'] +
+      mod$summary.fixed['x17', '0.025quant'] * test[,'x17'] +
+      mod$summary.fixed['x21', '0.025quant'] * test[,'x21'] +
+      mod$summary.fixed['x32', '0.025quant'] * test[,'x32'] +
+      mod$summary.fixed['x34', '0.025quant'] * test[,'x34'] + 
+     # mod$summary.fixed['x40', '0.025quant'] * test[,'x40']  +
+      mod$summary.fixed['x42', '0.025quant'] * test[,'x42'] +
+      
+     
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "0.025quant"])) + #---source random effect
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "0.025quant"])) + #---settlement type and region nested effects 
+      #rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "0.025quant"])) + #---set-type random effect
+    rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "0.025quant"])) + #---region random effect
+      
+      mod$summary.random$IDsr['0.025quant'][test_ind,1] + #--uncorrelated spatial random effects
+    
+      field_lower[test_ind,1]
+       
+      dens_htL <- exp(fixedL)
+      pop_htL <- dens_htL*test$bld
+    
+    
+    
+    ### upper ---------------------------------------------
+      
+      # spatial random effects based on the full data best model
+      sfield_nodes_upper <- mod$summary.random$spatial.field['0.975quant']
+      field_upper <- (A%*% as.data.frame(sfield_nodes_upper)[, 1])
+      
+      fixedU <-  
+        mod$summary.fixed['Intercept', '0.975quant'] +
+       # mod$summary.fixed['x2', '0.975quant'] * test[,'x2'] +
+        mod$summary.fixed['x6', '0.975quant'] * test[,'x6'] +
+        mod$summary.fixed['x17', '0.975quant'] * test[,'x17'] +
+        mod$summary.fixed['x21', '0.975quant'] * test[,'x21'] +
+        mod$summary.fixed['x32', '0.975quant'] * test[,'x32'] +
+        mod$summary.fixed['x34', '0.975quant'] * test[,'x34'] + 
+       # mod$summary.fixed['x40', '0.975quant'] * test[,'x40']  +
+        mod$summary.fixed['x42', '0.975quant'] * test[,'x42'] +
+        
+       
+       rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "0.975quant"])) + #---source random effect
+       rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "0.975quant"])) + #---settlement type and region nested effects 
+       #rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "0.975quant"])) + #---set-type random effect
+       rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "0.975quant"])) + #---region random effect
+        
+        mod$summary.random$IDsr['0.975quant'][test_ind,1] + #--uncorrelated spatial random effects
+
+      field_upper[test_ind,1]
+      
+      dens_htU <- exp(fixedU)
+      pop_htU <- dens_htU*test$bld
+    
+   
+    # calculate fit metrics
+    met_in <- mod_metrics2(test$pop,  
+                           pop_ht)
+    
+    met_list_in[[i]]<- unlist(met_in)
+    pred_list_in[[i]] <- data.frame(obs = test$obs, pred = pop_ht,
+                                    lower = pop_htL,
+                                    upper = pop_htU,
+                                    fold = rep(i, length(test$obs)),
+                                    data = rep("insample", length(test$obs)))
+  }
+  met_list_in_dat <- do.call(rbind,met_list_in) # y , fitted y
+  metrics_in <- apply(met_list_in_dat, 2, mean) #
+  pred_list_in_dat <- do.call(rbind,pred_list_in) # y ,fitted y , lower, upper,fold
+  
+  #-----------------------------------------------------------
+  #               out - of -sample
+  #-----------------------------------------------------------
+  met_list_out <- list()
+  pred_list_out <- list()
+  for(i in 1:length(k_uniq))
+  {
+    
+    print(paste0("out-of-sample cross-validation using fold ", i, sep=""))
+    train_ind <- which(dat$k_fold!=k_uniq[i])
+    test_ind <- which(dat$k_fold==k_uniq[i])
+    dim(train <- dat[train_ind, ])#---train set for fold i
+    dim(test <- dat[test_ind, ]) #---test set for fold i
+    
+    
+    train_coords <- coords[train_ind,]
+    test_coords <- coords[test_ind,]
+    
+    
+    ###---Create projection matrices for training and testing datasets
+    Ae<-inla.spde.make.A(mesh=mesh,loc=as.matrix(train_coords));dim(Ae) #training
+    
+    
+    #####------------------------
+    covars_train <- train[,c("x6", "x17", "x21", "x32", "x34",
+                             "x42", "region","set_reg", "source","IDsr")]; dim(covars_train)#,  "region"
+    stk_train <- inla.stack(data=list(y=train$dens), #the response
+                            
+                            A=list(Ae,1),  #the A matrix; the 1 is included to make the list(covariates)
+                            
+                            effects=list(c(list(Intercept=1), #the Intercept
+                                           iset),  #the spatial index
+                                         #the covariates
+                                         list(covars_train)
+                            ), 
+                            tag='train')
+    
+    
+    ###---Rerun INLA for model test prediction
+    model <-inla(form, #the formula
+                 data=inla.stack.data(stk_train,spde=spde),  #the data stack
+                 family= 'gamma',   #which family the data comes from
+                 control.predictor=list(A=inla.stack.A(stk_train),compute=TRUE),  #compute gives you the marginals of the linear predictor
+                 control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+                 verbose = T) #can include verbose=TRUE to see the log of the model runs
+    summary(model)
+    
+    
+    ##--------mean --------------------------------------------------------
+    # spatial random effects based on the full data best model
+    sfield_nodes_mean <- model$summary.random$spatial.field['mean']
+    field_mean <- (A%*% as.data.frame(sfield_nodes_mean)[, 1])
+    
+    fixed <-  
+      model$summary.fixed['Intercept', 'mean'] +
+     # model$summary.fixed['x2', 'mean'] * test[,'x2'] +
+      model$summary.fixed['x6', 'mean'] * test[,'x6'] +
+      model$summary.fixed['x17', 'mean'] * test[,'x17'] +
+      model$summary.fixed['x21', 'mean'] * test[,'x21'] +
+      model$summary.fixed['x32', 'mean'] * test[,'x32'] +
+      model$summary.fixed['x34', 'mean'] * test[,'x34'] + 
+      #model$summary.fixed['x40', 'mean'] * test[,'x40']  +
+      model$summary.fixed['x42', 'mean'] * test[,'x42'] +
+      
+     rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for source", "mean"])) + #---source random effect
+     rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for set_reg", "mean"])) + #---settlement type and region nested effects 
+     #rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for set_typ", "mean"])) + #---set-type random effect
+     rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for region", "mean"])) + #---region random effect
+      
+      mod$summary.random$IDsr['mean'][test_ind,1] + #--uncorrelated spatial random effects
+
+    field_mean[test_ind,1]
+    
+    dens_ht <- exp(fixed)
+    sum(pop_ht <- dens_ht*test$bld)
+    
+    
+    
+    #### LOWER---------------------------------
+    
+    # spatial random effects based on the full data best model
+    sfield_nodes_lower <- model$summary.random$spatial.field['0.025quant']
+    field_lower <- (A%*% as.data.frame(sfield_nodes_lower)[, 1])
+    
+    fixedL <-  
+      model$summary.fixed['Intercept', '0.025quant'] +
+      #model$summary.fixed['x2', '0.025quant'] * test[,'x2'] +
+      model$summary.fixed['x6', '0.025quant'] * test[,'x6'] +
+      model$summary.fixed['x17', '0.025quant'] * test[,'x17'] +
+      model$summary.fixed['x21', '0.025quant'] * test[,'x21'] +
+      model$summary.fixed['x32', '0.025quant'] * test[,'x32'] +
+      model$summary.fixed['x34', '0.025quant'] * test[,'x34'] + 
+      #model$summary.fixed['x40', '0.025quant'] * test[,'x40']  +
+      model$summary.fixed['x42', '0.025quant'] * test[,'x42'] +
+     
+     rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for source", "0.025quant"])) + #---source random effect
+     rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for set_reg", "0.025quant"])) + #---settlement type and region nested effects 
+     #rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for set_typ", "0.025quant"])) + #---set-type random effect
+     rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for region", "0.025quant"])) + #---region random effect
+      
+      mod$summary.random$IDsr['0.025quant'][test_ind,1] + #--uncorrelated spatial random effects
+ 
+    field_lower[test_ind,1]
+    
+    dens_htL <- exp(fixedL)
+    pop_htL <- dens_htL*test$bld
+    
+    
+    
+    ### upper ---------------------------------------------
+    
+    # spatial random effects based on the full data best model
+    sfield_nodes_upper <- model$summary.random$spatial.field['0.975quant']
+    field_upper <- (A%*% as.data.frame(sfield_nodes_upper)[, 1])
+    
+    
+    fixedU <-  
+      model$summary.fixed['Intercept', '0.975quant'] +
+      #model$summary.fixed['x2', '0.975quant'] * test[,'x2'] +
+      model$summary.fixed['x6', '0.975quant'] * test[,'x6'] +
+      model$summary.fixed['x17', '0.975quant'] * test[,'x17'] +
+      model$summary.fixed['x21', '0.975quant'] * test[,'x21'] +
+      model$summary.fixed['x32', '0.975quant'] * test[,'x32'] +
+      model$summary.fixed['x34', '0.975quant'] * test[,'x34'] + 
+      #model$summary.fixed['x40', '0.975quant'] * test[,'x40']  +
+      model$summary.fixed['x42', '0.975quant'] * test[,'x42'] +
+     
+     rnorm(nrow(test), 0, 1/sqrt(model$summary.hyperpar["Precision for source", "0.975quant"])) + #---source random effect
+     rnorm(nrow(test), 0, 1/sqrt(model$summary.hyperpar["Precision for set_reg", "0.975quant"])) + #---settlement type and region nested effects 
+     #rnorm(nrow(test), 0, 1/sqrt(model$summary.hyperpar["Precision for set_typ", "0.975quant"])) + #---set-type random effect
+     rnorm(nrow(test), 0, 1/sqrt(model$summary.hyperpar["Precision for region", "0.975quant"])) + #---region random effect
+     
+      mod$summary.random$IDsr['0.975quant'][test_ind,1] + #--uncorrelated spatial random effects
+
+    field_upper[test_ind,1]
+    
+    dens_htU <- exp(fixedU)
+    pop_htU <- dens_htU*test$bld
+    
+  
+    # calculate fit metrics
+    met_out <- mod_metrics2(test$pop,  
+                            pop_ht)
+    
+    met_list_out[[i]]<- unlist(met_out)
+    pred_list_out[[i]] <- data.frame(obs = test$obs, pred = pop_ht,
+                                     lower = pop_htL,
+                                     upper = pop_htU,
+                                     fold = rep(i, length(test$obs)),
+                                     data = rep("outsample", length(test$obs)))
+  }
+  met_list_out_dat <- do.call(rbind,met_list_out)
+  metrics_out <- apply(met_list_out_dat, 2, mean) # fit metrics
+  
+  pred_list_out_dat <- do.call(rbind,pred_list_out)# predictions
+  
+  cv_mets <- rbind(metrics_in, metrics_out)
+  output <- list( met_list_in_dat = met_list_in_dat,
+                  met_list_out_dat = met_list_out_dat,
+                  pred_dat = rbind(pred_list_in_dat, pred_list_out_dat),
+                  cv_metrics = rbind(metrics_in, metrics_out))
+}
+
+dat <- dat
+dat$obs <- dat$Imputed_LHHSIZE # observed household size
+
+(cross_val_f <- cross_validate_f(dat, n.folds = 5, 
+                             mod = mod_f, 
+                             form = form_f,
+                             A, 
+                             seed = 35642114))
+
+#cross_val_f$met_list_in_dat  # in-sample metrics per fold 
+#cross_val_f$met_list_out_dat  # out-of-sample metrics per fold
+cross_val_f$cv_metrics    # combined averaged metrics
+cross_val_f$pred_dat  # combined prediction data
+dim(cross_val_f$pred_dat)
+
+(cross_f1_metrics <- rbind(cross_val_f$met_list_in_dat, cross_val_f$met_list_out_dat))
+write.csv(cross_f1_metrics , file=paste0(results_path_f, "/folds.csv"))
+
+```
+
+```{r visualize}
+#-- Scatterplots of spatial model cross-validation results----
+pred.data <- cross_val_f$pred_dat
+pred.data$fold <- factor(pred.data$fold)
+pred.data$data <- factor(pred.data$data,
+                         levels = c("insample", "outsample"),
+                         labels = c("In-Sample", "Out-of-Sample"))
+write.csv(pred.data, file=paste0(results_path_f, "/pre.data.csv"))
+```
+
+```{r prediction}
+#-- for spatial model----
+sim_spatial_f <- function(model, dat, Aprediction, run, inla.seed)
+{
+  fixedeff <- dens_hat <- pop_hat <- matrix(0, nrow=nrow(dat), ncol = run)
+  m1.samp <- inla.posterior.sample(run, model, 
+                                   seed = inla.seed, 
+                                   selection=list(#x2 = 1, 
+                                                  x6 = 1, 
+                                                  x17 = 1, 
+                                                  x21 = 1,
+                                                  x32 = 1,
+                                                  x34 = 1,
+                                                 # x40 = 1, 
+                                                  x42 = 1),
+                                   num.threads="1:1")
+  
+  sfield_nodes_mean <- model$summary.random$spatial.field['mean']
+  field_mean <- (Apred%*% as.data.frame(sfield_nodes_mean)[, 1])
+  for(i in 1:run)#
+  {
+    fixedeff[,i] <- 
+      model$summary.fixed['Intercept', 'mean'] +
+      #m1.samp[[i]]$latent[1,] * dat[,'x2']  +
+      m1.samp[[i]]$latent[1,] * dat[,'x6']  +
+      m1.samp[[i]]$latent[2,] * dat[,'x17'] +
+      m1.samp[[i]]$latent[3,] * dat[,'x21'] +
+      m1.samp[[i]]$latent[4,] * dat[,'x32'] + 
+      m1.samp[[i]]$latent[5,] * dat[,'x34'] +
+     # m1.samp[[i]]$latent[7,] * dat[,'x40'] +
+      m1.samp[[i]]$latent[6,] * dat[,'x42'] +
+      
+     rnorm(nrow(dat), 0, sqrt(1/m1.samp[[2]]$hyperpar["Precision for IDsr"])) +
+     rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for source"])) +
+     rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for set_reg"])) + #---settlement type and region nested effects 
+     #rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for set_typ"])) + #---set-type random effect
+     rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for region"])) + #---region random effect 
+      field_mean[,1]
+    
+    dens_hat[,i] <- exp(fixedeff[,i])
+    pop_hat[,i] <- dens_hat[,i]*dat$bld
+    
+  }
+  dat$mean_dens_hat <- apply(dens_hat, 1, mean, na.rm=T) 
+  dat$mean_pop_hat  <- apply(pop_hat, 1, mean, na.rm=T) #
+  dat$lower_pop_hat <- apply(pop_hat, 1, quantile, probs=c(0.025), na.rm=T) #
+  dat$upper_pop_hat <- apply(pop_hat, 1, quantile, probs=c(0.975), na.rm=T) #
+  dat$sd_pop_hat <- apply(pop_hat, 1, sd, na.rm=T) #
+  dat$cv <- dat$sd_pop_hat/dat$mean_pop_hat#
+  
+  output <- list(pop_hat = pop_hat,
+                 est_data = dat)
+  
+}
+
+run=100
+inla.seed=35642114
+data$bld <- data$CMR_buildings_count
+
+system.time(str(sim.spat_f <- sim_spatial_f(mod_f,data,Apred, run, inla.seed))) # spatial
+
+sum(sim.spat_f$est_dat$mean_pop_hat,na.rm=T) # sim.spat_f is a list
+
+#  Join the posterior sample to the prediction data
+data.sim_f <- data.frame(cbind(data[,c("CMR_Regions", "CMR_Department","CMR_Settlement_Classification")], sim.spat_f$pop_hat))
+write.csv(data.sim_f, file=paste0(results_path_f, "/estimates/data.sim.csv"))
+```
+
+```{r Region  estimates}
+(regional.est_f <- regional_est(data.sim_f, 100))
+sum(regional.est_f$total)
+regional.est_f$method <- rep("Proposed", nrow(regional.est_f))
+
+write.csv(regional.est_f, file=paste0(results_path_f, "/estimates/regional_final.csv"))
+```
+
+```{r region  Errorplots}
+#regional.est_f<-read.csv(file.path(results_path_f,"/estimates/regional_final.csv"))
+regional.est_f$total2 <- round(regional.est_f$total/1000)
+regional.est_f$lower2 <- round(regional.est_f$lower/1000)
+regional.est_f$upper2 <- round(regional.est_f$upper/1000)
+
+pd <- ggplot(regional.est_f, aes(x=reorder(names, -total), 
+                      y=total2)) +
+  geom_errorbar(aes(ymin = lower2, ymax = upper2),
+                position = position_dodge(width = 0.4), width = 0.4,
+                size=0.9)+
+  geom_point(size = 2, color = "red", alpha=0.9) +
+  theme_bw()#+
+  #coord_flip() 
+  
+  
+pdh <- ggpar(pd, ylab="Estimated population count ('000)", xlab="Region",
+              legend = "none", legend.title = "Region:",
+              font.legend=c(14),
+              # font.label = list(size = 12, face = "bold", color ="red"),
+              #palette = "pnj",
+              font.x = c(14),
+              font.y = c(14),
+              font.main=c(14),
+              font.xtickslab =c(12),
+               font.ytickslab =c(14),
+              xtickslab.rt = 45)
+pdh
+
+ggsave(filename=paste0(results_path_f, "/estimates/reginal.est.png"), plot = pdh, width = 6, height = 6, dpi = 300)
+
+#-----------------------------no y
+pd.1 <- ggplot(regional.est_f, aes(x=reorder(names, -total), 
+                      y=total2)) +
+  geom_errorbar(aes(ymin = lower2, ymax = upper2),
+                position = position_dodge(width = 0.4), width = 0.4,
+                size=0.9)+
+  geom_point(size = 2, color = "red", alpha=0.9) +
+    scale_y_continuous(labels=NULL)+
+  theme_bw()#+
+  #coord_flip() 
+  
+  
+pdh.1 <- ggpar(pd.1, ylab="Estimated population count ('000)", xlab="Region",
+              legend = "none", legend.title = "Region:",
+              font.legend=c(14),
+              # font.label = list(size = 12, face = "bold", color ="red"),
+              #palette = "pnj",
+              font.x = c(14),
+              font.y = c(14),
+              font.main=c(14),
+              font.xtickslab =c(12),
+               font.ytickslab =c(14),
+              xtickslab.rt = 45)
+pdh.1
+
+ggsave(filename=paste0(results_path_f, "/estimates/reginal.est.noy2.png"), plot = pdh.1, width = 6, height = 6, dpi = 300)
+
+```
+
+```{r region  modelled-projected}
+#| label: Compare the projected regional estimates with the modelled
+library(ggplot2)
+library(scales)
+theme_set(theme_classic())
+
+#-- prep data----
+df_f<-df
+names(df_f)
+df_f$NIS.Projected<- df_f$NIS.Projected/1000
+#df_f$total <- df_f$total/1000
+df_f$total <- regional.est_f$total/1000
+
+# Projected 
+df_f1 <- df_f[,c("names", "NIS.Projected")]
+df_f1$Method <- rep("Projected", nrow(df_f1))
+colnames(df_f1) <- c("Region", "Estimate", "Method")
+
+# Modelled 
+df_f2 <- df_f[,c("names", "total")]
+df_f2$Method <- rep("Modelled", nrow(df_f2))
+colnames(df_f2) <- c("Region", "Estimate", "Method")
+
+# combined
+df_f3 <- rbind(df_f1, df_f2)
+df_f3$Method <- factor(df_f3$Method, levels = c("Projected", "Modelled"))
+write.csv(df_f3, file=paste0(results_path_f, "/estimates/modelled.projected.csv"))
+```
+
+# ---------------------------------------------bart-backward
+
+```{r}
+bart_mod<-bart_mod4.2
+bart_form <- bart_form4.2
+```
+
+```{r post and spatial.field}
+#-- extract the posterior ~ of the fixed effects for best model----
+#bart_fixed.effects <- round(bart_mod$summary.fixed,4); bart_fixed.effects; bart_mod$summary.hyperpar
+write.csv(bart_mod$summary.fixed, file=paste0(bart_results_path_b, "/post.fixed.effects.csv"))
+write.csv(bart_mod$summary.hyperpar, file=paste0(bart_results_path_b, "/post.hyperpar.csv"))
+
+## Remove points not in the study domain
+bart_g.mean <- inla.mesh.project(gproj, bart_mod$summary.random$spatial.field$mean)
+bart_g.sd <- inla.mesh.project(gproj,  bart_mod$summary.random$spatial.field$sd)
+
+bart_g.mean[!xy.in] <- bart_g.sd[!xy.in] <- NA
+
+library(viridisLite)
+col <- viridis(100)
+spatial.field<-grid.arrange(levelplot(bart_g.mean, scales=list(draw=F), 
+                       xlab='', ylab='', cex.lab=2, 
+                       main='Spatial field Mean',col.regions = col),
+             levelplot(bart_g.sd, scal=list(draw=F), xla='', 
+                       yla='', main='Spatial field SD',
+                       col.regions = col), nrow=1)
+
+ggsave(filename=paste0(bart_results_path_b, "/spatial.field3.png"), plot = spatial.field, width = 6, height = 4, dpi = 300)
+
+##------------------------------------posterior dens-----------------
+
+#x16","x11","x7","x13","x40","x1","x25","x43"
+
+bart_covars_pred <- data.frame(
+  Intercept = 1,
+  x16 = x16_vec, x11 = x11_vec, x7 =x7_vec, x13 = x13_vec, x1 = x1_vec, x25 = x25_vec, x40 = x40_vec, x43 = x43_vec
+)
+
+bart_stk_pred <- inla.stack(
+  data    = list(y = NA),
+  A       = list(A_pred, 1),
+ effects = list(
+  spatial.field = iset$spatial.field,bart_covars_pred),
+  #list(c(list(Intercept=1),  iset),  list(covars_pred) ),
+  tag     = "pred"
+)
+
+bart_stk_all <- inla.stack(bart_stk_est, bart_stk_pred)
+bart_mod_pred <- inla(bart_form,
+  data = inla.stack.data(bart_stk_all, spde = spde),
+  family = "gamma",
+  control.predictor = list(A = inla.stack.A(bart_stk_all), compute = TRUE),
+  control.mode = list(theta = bart_mod$mode$theta, restart = FALSE),
+  verbose = T
+)
+id_pred  <- inla.stack.index(bart_stk_all, "pred")$data
+
+yhat_mean <- bart_mod_pred$summary.fitted.values$mean[id_pred]  
+yhat_sd   <- bart_mod_pred$summary.fitted.values$sd[id_pred]   
+#yhat_low  <- bart_mod_pred$summary.fitted.values$`0.025quant`[id_pred]
+#yhat_high <- bart_mod_pred$summary.fitted.values$`0.975quant`[id_pred]
+
+nx <- length(gproj$x); ny <- length(gproj$y)
+
+yhat_mean_grid <- matrix(NA_real_, nx, ny)
+yhat_sd_grid   <- matrix(NA_real_, nx, ny)
+yhat_low_grid  <- matrix(NA_real_, nx, ny)
+yhat_high_grid <- matrix(NA_real_, nx, ny)
+
+yhat_mean_grid[xy.in] <- yhat_mean
+yhat_sd_grid[xy.in]   <- yhat_sd
+#yhat_low_grid[xy.in]  <- yhat_low
+#yhat_high_grid[xy.in] <- yhat_high
+
+
+library(gridExtra)
+library(viridis)
+
+plt_mean <- levelplot(yhat_mean_grid,
+                      col.regions = inferno(200),
+                      scales = list(draw = FALSE),
+                      xlab = "", ylab = "",
+                      main = "Density Mean")
+
+plt_sd <- levelplot(yhat_sd_grid,
+                    col.regions = inferno(200),
+                    scales = list(draw = FALSE),
+                    xlab = "", ylab = "",
+                    main = "Density SD")
+
+dens.map<- gridExtra::grid.arrange(plt_mean, plt_sd, nrow = 1)
+ggsave(filename=paste0(bart_results_path_b, "/dens.map3.png"), plot = dens.map, width = 6, height = 4, dpi = 300)
+
+
+```
+
+```{r CV}
+#| label: CV for spatial model
+
+#-- CV for spatial model-----
+bart_cross_validate <- function(dat, n.folds, mod, bart_form, A, seed)
+{
+
+  N <- nrow(dat)
+  table(ind_train <- factor(sample(x = rep(1:n.folds, each = floor(N / n.folds)),  # Sample IDs for training data
+                                   size = N)))
+  
+  table(as.numeric(ind_train)) 
+  dat$k_fold <- as.numeric(ind_train)
+  coords = cbind(dat$lon, dat$lat)
+  
+  k_uniq <-sort(unique(dat$k_fold))
+  
+  
+  #---------------------------------------------------------------
+  #                   in-sample
+  #---------------------------------------------------------------
+  
+  met_list_in <- list()
+  pred_list_in <- list()
+  for(i in 1:length(k_uniq))
+  {
+    
+    print(paste0("in-sample cross-validation using fold ", i, sep=""))
+    test_ind <- which(dat$k_fold==k_uniq[i])
+    dim(test <- dat[test_ind, ]) #---test set for fold i
+    
+    
+    train_coords <- coords
+    test_coords <- coords[test_ind,]
+    
+    ##--------mean --------------------------------------------------------
+    # spatial random effects based on the full data best model
+    sfield_nodes_mean <- mod$summary.random$spatial.field['mean']
+    field_mean <- (A%*% as.data.frame(sfield_nodes_mean)[, 1])
+    #dim(A);dim(as.data.frame(sfield_nodes_mean))
+    fixed <-  
+     mod$summary.fixed['Intercept', 'mean'] +
+     mod$summary.fixed['x16', 'mean'] * test[,'x16'] +
+     mod$summary.fixed['x11', 'mean'] * test[,'x11'] +
+     mod$summary.fixed['x7', 'mean'] * test[,'x7'] +
+     mod$summary.fixed['x13', 'mean'] * test[,'x13'] +
+     mod$summary.fixed['x40', 'mean'] * test[,'x40'] +
+     mod$summary.fixed['x1', 'mean'] * test[,'x1'] + 
+     mod$summary.fixed['x25', 'mean'] * test[,'x25'] +
+     mod$summary.fixed['x43', 'mean'] * test[,'x43'] +
+      rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "mean"]) )+ #---source random effect
+      rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "mean"])) + #---settlement type and region nested effects 
+      #rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "mean"])) + #---set-type random effect
+      rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "mean"])) + #---region random effect
+     
+      mod$summary.random$IDsr['mean'][test_ind,1] + #--uncorrelated spatial random effect
+    
+      field_mean[test_ind,1]
+    
+       dens_ht <- exp(fixed)
+       sum(pop_ht <- dens_ht*test$bld)
+    
+    
+    
+    #### LOWER---------------------------------
+      # spatial random effects based on the full data best model
+       sfield_nodes_lower <- mod$summary.random$spatial.field['0.025quant']
+       field_lower <- (A%*% as.data.frame(sfield_nodes_lower)[, 1])
+       
+    fixedL <-  
+      mod$summary.fixed['Intercept', '0.025quant'] +
+      mod$summary.fixed['x16', '0.025quant'] * test[,'x16'] +
+      mod$summary.fixed['x11', '0.025quant'] * test[,'x12'] +
+      mod$summary.fixed['x7', '0.025quant'] * test[,'x7'] +
+      mod$summary.fixed['x13', '0.025quant'] * test[,'x13'] +
+      mod$summary.fixed['x40', '0.025quant'] * test[,'x40'] +
+      mod$summary.fixed['x1', '0.025quant'] * test[,'x1'] + 
+      mod$summary.fixed['x25', '0.025quant'] * test[,'x25']  +
+      mod$summary.fixed['x43', '0.025quant'] * test[,'x43'] +
+      
+     
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "0.025quant"])) + #---source random effect
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "0.025quant"])) + #---settlement type and region nested effects 
+     #rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "0.025quant"])) + #---set-type random effect
+     rnorm(nrow(test), 0,sqrt(1/mod$summary.hyperpar["Precision for region", "0.025quant"])) + #---region random effect
+      
+      mod$summary.random$IDsr['0.025quant'][test_ind,1] + #--uncorrelated spatial random effects
+    
+      field_lower[test_ind,1]
+       
+      dens_htL <- exp(fixedL)
+      pop_htL <- dens_htL*test$bld
+    
+    
+    
+    ### upper ---------------------------------------------
+      
+      # spatial random effects based on the full data best model
+      sfield_nodes_upper <- mod$summary.random$spatial.field['0.975quant']
+      field_upper <- (A%*% as.data.frame(sfield_nodes_upper)[, 1])
+      
+      fixedU <-  
+        mod$summary.fixed['Intercept', '0.975quant'] +
+        mod$summary.fixed['x16', '0.975quant'] * test[,'x16'] +
+        mod$summary.fixed['x11', '0.975quant'] * test[,'x11'] +
+        mod$summary.fixed['x7', '0.975quant'] * test[,'x7'] +
+        mod$summary.fixed['x13', '0.975quant'] * test[,'x13'] +
+        mod$summary.fixed['x40', '0.975quant'] * test[,'x40'] +
+        mod$summary.fixed['x1', '0.975quant'] * test[,'x1'] + 
+        mod$summary.fixed['x25', '0.975quant'] * test[,'x25']  +
+        mod$summary.fixed['x43', '0.975quant'] * test[,'x43'] +
+        
+       
+       rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "0.975quant"])) + #---source random effect
+      rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "0.975quant"])) + #---settlement type and region nested effects 
+      # rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "0.975quant"])) + #---set-type random effect
+       rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "0.975quant"])) + #---region random effect
+        
+        mod$summary.random$IDsr['0.975quant'][test_ind,1] + #--uncorrelated spatial random effects
+
+      field_upper[test_ind,1]
+      
+      dens_htU <- exp(fixedU)
+      pop_htU <- dens_htU*test$bld
+    
+    
+    # calculate fit metrics
+    met_in <- mod_metrics2(test$pop,  
+                           pop_ht)
+    
+    met_list_in[[i]]<- unlist(met_in)
+    pred_list_in[[i]] <- data.frame(obs = test$obs, pred = pop_ht,
+                                    lower = pop_htL,
+                                    upper = pop_htU,
+                                    fold = rep(i, length(test$obs)),
+                                    data = rep("insample", length(test$obs)))
+  }
+  met_list_in_dat <- do.call(rbind,met_list_in) # y , fitted y
+  metrics_in <- apply(met_list_in_dat, 2, mean) #
+  pred_list_in_dat <- do.call(rbind,pred_list_in) # y ,fitted y , lower, upper,fold
+  
+  #-----------------------------------------------------------
+  #               out - of -sample
+  #-----------------------------------------------------------
+  met_list_out <- list()
+  pred_list_out <- list()
+  for(i in 1:length(k_uniq))
+  {
+    
+    print(paste0("out-of-sample cross-validation using fold ", i, sep=""))
+    train_ind <- which(dat$k_fold!=k_uniq[i])
+    test_ind <- which(dat$k_fold==k_uniq[i])
+    dim(train <- dat[train_ind, ])#---train set for fold i
+    dim(test <- dat[test_ind, ]) #---test set for fold i
+    
+    
+    train_coords <- coords[train_ind,]
+    test_coords <- coords[test_ind,]
+    
+    
+    ###---Create projection matrices for training and testing datasets
+    Ae<-inla.spde.make.A(mesh=mesh,loc=as.matrix(train_coords));dim(Ae) #training
+    
+    
+    #####------------------------
+    covars_train <- train[,c("x16", "x11", "x7", "x13", "x40", "x1", "x25",
+                             "x43", "source","IDsr","set_reg","region")]; dim(covars_train)#
+    stk_train <- inla.stack(data=list(y=train$dens), #the response
+                            
+                            A=list(Ae,1),  #the A matrix; the 1 is included to make the list(covariates)
+                            
+                            effects=list(c(list(Intercept=1), #the Intercept
+                                           iset),  #the spatial index
+                                         #the covariates
+                                         list(covars_train)
+                            ), 
+                            tag='train')
+    
+    
+    ###---Rerun INLA for model test prediction
+    model <-inla(bart_form, #the bart_formula
+                 data=inla.stack.data(stk_train,spde=spde),  #the data stack
+                 family= 'gamma',   #which family the data comes from
+                 control.predictor=list(A=inla.stack.A(stk_train),compute=TRUE),  #compute gives you the marginals of the linear predictor
+                 control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+                 verbose = T) #can include verbose=TRUE to see the log of the model runs
+    summary(model)
+    
+    
+    ##--------mean --------------------------------------------------------
+    # spatial random effects based on the full data best model
+    sfield_nodes_mean <- model$summary.random$spatial.field['mean']
+    field_mean <- (A%*% as.data.frame(sfield_nodes_mean)[, 1])
+    
+    fixed <-  
+      model$summary.fixed['Intercept', 'mean'] +
+      model$summary.fixed['x16', 'mean'] * test[,'x16'] +
+      model$summary.fixed['x11', 'mean'] * test[,'x11'] +
+      model$summary.fixed['x7', 'mean'] * test[,'x7'] +
+      model$summary.fixed['x13', 'mean'] * test[,'x13'] +
+      model$summary.fixed['x40', 'mean'] * test[,'x40'] +
+      model$summary.fixed['x1', 'mean'] * test[,'x1'] + 
+      model$summary.fixed['x25', 'mean'] * test[,'x25']  +
+      model$summary.fixed['x43', 'mean'] * test[,'x43'] +
+      
+     rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for source", "mean"])) + #---source random effect
+     rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for set_reg", "mean"])) + #---settlement type and region nested effects 
+     #rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for set_typ", "mean"])) + #---set-type random effect
+     rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for region", "mean"])) + #---region random effect
+      
+      mod$summary.random$IDsr['mean'][test_ind,1] + #--uncorrelated spatial random effects
+
+    field_mean[test_ind,1]
+    
+    dens_ht <- exp(fixed)
+    sum(pop_ht <- dens_ht*test$bld)
+    
+    
+    
+    #### LOWER---------------------------------
+    
+    # spatial random effects based on the full data best model
+    sfield_nodes_lower <- model$summary.random$spatial.field['0.025quant']
+    field_lower <- (A%*% as.data.frame(sfield_nodes_lower)[, 1])
+    
+    fixedL <-  
+      model$summary.fixed['Intercept', '0.025quant'] +
+      model$summary.fixed['x16', '0.025quant'] * test[,'x16'] +
+      model$summary.fixed['x11', '0.025quant'] * test[,'x11'] +
+      model$summary.fixed['x7', '0.025quant'] * test[,'x7'] +
+      model$summary.fixed['x13', '0.025quant'] * test[,'x13'] +
+      model$summary.fixed['x40', '0.025quant'] * test[,'x40'] +
+      model$summary.fixed['x1', '0.025quant'] * test[,'x1'] + 
+      model$summary.fixed['x25', '0.025quant'] * test[,'x25']  +
+      model$summary.fixed['x43', '0.025quant'] * test[,'x43'] +
+     
+     rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for source", "0.025quant"])) + #---source random effect
+     rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for set_reg", "0.025quant"])) + #---settlement type and region nested effects 
+     #rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for set_typ", "0.025quant"])) + #---set-type random effect
+     rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for region", "0.025quant"])) + #---region random effect
+      
+      mod$summary.random$IDsr['0.025quant'][test_ind,1] + #--uncorrelated spatial random effects
+ 
+    field_lower[test_ind,1]
+    
+    dens_htL <- exp(fixedL)
+    pop_htL <- dens_htL*test$bld
+    
+    
+    
+    ### upper ---------------------------------------------
+    
+    # spatial random effects based on the full data best model
+    sfield_nodes_upper <- model$summary.random$spatial.field['0.975quant']
+    field_upper <- (A%*% as.data.frame(sfield_nodes_upper)[, 1])
+    
+    
+    fixedU <-  
+      model$summary.fixed['Intercept', '0.975quant'] +
+      model$summary.fixed['x16', '0.975quant'] * test[,'x16'] +
+      model$summary.fixed['x11', '0.975quant'] * test[,'x11'] +
+      model$summary.fixed['x7', '0.975quant'] * test[,'x7'] +
+      model$summary.fixed['x13', '0.975quant'] * test[,'x13'] +
+      model$summary.fixed['x40', '0.975quant'] * test[,'x40'] +
+      model$summary.fixed['x1', '0.975quant'] * test[,'x1'] + 
+      model$summary.fixed['x25', '0.975quant'] * test[,'x25']  +
+      model$summary.fixed['x43', '0.975quant'] * test[,'x43'] +
+     
+     rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for source", "0.975quant"])) + #---source random effect
+     rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for set_reg", "0.975quant"])) + #---settlement type and region nested effects 
+     #rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for set_typ", "0.975quant"])) + #---set-type random effect
+     rnorm(nrow(test), 0, sqrt(1/model$summary.hyperpar["Precision for region", "0.975quant"])) + #---region random effect
+     
+      mod$summary.random$IDsr['0.975quant'][test_ind,1] + #--uncorrelated spatial random effects
+
+    field_upper[test_ind,1]
+    
+    dens_htU <- exp(fixedU)
+    pop_htU <- dens_htU*test$bld
+    
+    # calculate fit metrics
+    met_out <- mod_metrics2(test$pop,  
+                            pop_ht)
+    
+    met_list_out[[i]]<- unlist(met_out)
+    pred_list_out[[i]] <- data.frame(obs = test$obs, pred = pop_ht,
+                                     lower = pop_htL,
+                                     upper = pop_htU,
+                                     fold = rep(i, length(test$obs)),
+                                     data = rep("outsample", length(test$obs)))
+  }
+  met_list_out_dat <- do.call(rbind,met_list_out)
+  metrics_out <- apply(met_list_out_dat, 2, mean) # fit metrics
+  
+  pred_list_out_dat <- do.call(rbind,pred_list_out)# predictions
+  
+  cv_mets <- rbind(metrics_in, metrics_out)
+  output <- list( met_list_in_dat = met_list_in_dat,
+                  met_list_out_dat = met_list_out_dat,
+                  pred_dat = rbind(pred_list_in_dat, pred_list_out_dat),
+                  cv_metrics = rbind(metrics_in, metrics_out))
+}
+
+dat <- dat
+dat$obs <- dat$Imputed_LHHSIZE # observed household size
+
+(bart_cross_val <- bart_cross_validate(dat, n.folds = 5, 
+                             mod = bart_mod, 
+                             bart_form = bart_form,
+                             A, 
+                             seed = 35642114))
+
+#bart_cross_val$met_list_in_dat  # in-sample metrics per fold 
+#bart_cross_val$met_list_out_dat  # out-of-sample metrics per fold
+bart_cross_val$cv_metrics    # combined averaged metrics
+bart_cross_val$pred_dat  # combined prediction data
+dim(bart_cross_val$pred_dat)
+(cross_bart_metrics1 <- rbind(bart_cross_val$met_list_in_dat,bart_cross_val$met_list_out_dat))
+write.csv(cross_bart_metrics1, file=paste0(bart_results_path_b, "/folds.csv"))
+```
+
+```{r visualize}
+#-- Scatterplots of spatial model cross-validation results----
+bart_pred.data <- bart_cross_val$pred_dat
+bart_pred.data$fold <- factor(bart_pred.data$fold)
+bart_pred.data$data <- factor(bart_pred.data$data,
+                         levels = c("insample", "outsample"),
+                         labels = c("In-Sample", "Out-of-Sample"))
+write.csv(bart_pred.data, file=paste0(bart_results_path_b, "/pre.data.csv"))
+
+
+#ggsave(filename=paste0(bart_results_path_b, "/spatial.cv.png"), plot = spatial.cv, width = 6, height = 6, dpi = 300)
+
+```
+
+```{r prediction}
+#-- for spatial model----
+sim_spatial_bart <- function(model, dat, Aprediction, run,inla.seed)
+{
+  fixedeff <- dens_hat <- pop_hat <- matrix(0, nrow=nrow(dat), ncol = run)
+  m1.samp <- inla.posterior.sample(run, model, 
+                                   seed = inla.seed, 
+                                   selection=list(x16 = 1, 
+                                                  x11 = 1, 
+                                                  x7 = 1, 
+                                                  x13 = 1,
+                                                  x40 = 1,
+                                                  x1 = 1,
+                                                  x25 = 1, 
+                                                  x43 = 1),
+                                   num.threads="1:1")
+  
+  sfield_nodes_mean <- model$summary.random$spatial.field['mean']
+  field_mean <- (Apred%*% as.data.frame(sfield_nodes_mean)[, 1])
+  for(i in 1:run)
+  {
+    fixedeff[,i] <- 
+      model$summary.fixed['Intercept', 'mean'] +
+      m1.samp[[i]]$latent[1,] * dat[,'x16']  +
+      m1.samp[[i]]$latent[2,] * dat[,'x11']  +
+      m1.samp[[i]]$latent[3,] * dat[,'x7'] +
+      m1.samp[[i]]$latent[4,] * dat[,'x13'] +
+      m1.samp[[i]]$latent[5,] * dat[,'x40'] + 
+      m1.samp[[i]]$latent[6,] * dat[,'x1'] +
+      m1.samp[[i]]$latent[7,] * dat[,'x25'] +
+      m1.samp[[i]]$latent[8,] * dat[,'x43'] +
+      
+     rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for IDsr"])) +
+     rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for source"])) +
+     rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for set_reg"])) + #---settlement type and region nested effects 
+    # rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for set_typ"])) + #---set-type random effect
+     rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for region"])) + #---region random effect 
+      field_mean[,1]
+    
+    
+    dens_hat[,i] <- exp(fixedeff[,i])
+    pop_hat[,i] <- dens_hat[,i]*dat$bld
+    
+  }
+  dat$mean_dens_hat <- apply(dens_hat, 1, mean, na.rm=T) 
+  dat$mean_pop_hat  <- apply(pop_hat, 1, mean, na.rm=T) #
+  dat$lower_pop_hat <- apply(pop_hat, 1, quantile, probs=c(0.025), na.rm=T) #
+  dat$upper_pop_hat <- apply(pop_hat, 1, quantile, probs=c(0.975), na.rm=T) #
+  dat$sd_pop_hat <- apply(pop_hat, 1, sd, na.rm=T) #
+  dat$cv <- dat$sd_pop_hat/dat$mean_pop_hat#
+  
+  output <- list(pop_hat = pop_hat,
+                 est_data = dat)
+  
+}
+
+run=100
+inla.seed = 35642114
+data$bld <- data$CMR_buildings_count
+
+system.time(str(sim.spat_bart <- sim_spatial_bart(bart_mod,data,Apred, run,inla.seed))) 
+
+sum(sim.spat_bart$est_dat$mean_pop_hat,na.rm=T)#sim.spat_bart is a list
+
+#  Join the posterior sample to the prediction data
+names(data)
+data.sim_bart <- data.frame(cbind(data[,c("CMR_Regions", "CMR_Department","CMR_Settlement_Classification")], sim.spat_bart$pop_hat))
+write.csv(data.sim_bart, file=paste0(bart_results_path_b, "/estimates/data.sim.csv"))
+```
+
+```{r Region estimates}
+(regional.est_bart <- regional_est(data.sim_bart, 100))
+sum(regional.est_bart$total)
+regional.est_bart$method <- rep("Proposed", nrow(regional.est_bart))
+
+write.csv(regional.est_bart, file=paste0(bart_results_path_b, "/estimates/regional_final.csv"))
+```
+
+```{r region error bar}
+#regional.est_bart<-read.csv(file.path(bart_results_path_b,"/estimates/regional_final.csv"))
+regional.est_bart$total2 <- round(regional.est_bart$total/1000)
+regional.est_bart$lower2 <- round(regional.est_bart$lower/1000)
+regional.est_bart$upper2 <- round(regional.est_bart$upper/1000)
+
+pd <- ggplot(regional.est_bart, aes(x=reorder(names, -total), 
+                      y=total2)) +
+  geom_errorbar(aes(ymin = lower2, ymax = upper2),
+                position = position_dodge(width = 0.4), width = 0.4,
+                size=0.9)+
+  geom_point(size = 2, color = "red", alpha=0.9) +
+  theme_bw()#+
+  #coord_flip() 
+  
+  
+pdh <- ggpar(pd, ylab="Estimated population count ('000)", xlab="Region",
+              legend = "none", legend.title = "Region:",
+              font.legend=c(14),
+              # font.label = list(size = 12, face = "bold", color ="red"),
+              #palette = "pnj",
+              font.x = c(14),
+              font.y = c(14),
+              font.main=c(14),
+              font.xtickslab =c(12),
+               font.ytickslab =c(14),
+              xtickslab.rt = 45)
+pdh
+
+ggsave(filename=paste0(bart_results_path_b, "/estimates/reginal.est.png"), plot = pdh, width = 6, height = 6, dpi = 300)
+
+#-----------------------------no y
+pd.1 <- ggplot(regional.est_bart, aes(x=reorder(names, -total), 
+                      y=total2)) +
+  geom_errorbar(aes(ymin = lower2, ymax = upper2),
+                position = position_dodge(width = 0.4), width = 0.4,
+                size=0.9)+
+  geom_point(size = 2, color = "red", alpha=0.9) +
+    scale_y_continuous(labels=NULL)+
+  theme_bw()#+
+  #coord_flip() 
+  
+  
+pdh.1 <- ggpar(pd.1, ylab="Estimated population count ('000)", xlab="Region",
+              legend = "none", legend.title = "Region:",
+              font.legend=c(14),
+              # font.label = list(size = 12, face = "bold", color ="red"),
+              #palette = "pnj",
+              font.x = c(14),
+              font.y = c(14),
+              font.main=c(14),
+              font.xtickslab =c(12),
+               font.ytickslab =c(14),
+              xtickslab.rt = 45)
+pdh.1
+
+ggsave(filename=paste0(bart_results_path_b, "/estimates/reginal.est.noy3.png"), plot = pdh.1, width = 6, height = 6, dpi = 300)
+
+```
+
+```{r region  modelled-projected}
+#| label: Compare the projected regional estimates with the modelled
+library(ggplot2)
+library(scales)
+theme_set(theme_classic())
+
+#-- prep data----
+names(df)
+df_bart<-df
+df_bart$NIS.Projected<- df_bart$NIS.Projected/1000
+#df_bart$total <- df_bart$total/1000
+df_bart$total <- regional.est_bart$total/1000
+
+# Projected 
+df_bart1 <- df_bart[,c("names", "NIS.Projected")]
+df_bart1$Method <- rep("Projected", nrow(df_bart1))
+colnames(df_bart1) <- c("Region", "Estimate", "Method")
+
+# Modelled 
+df_bart2 <- df_bart[,c("names", "total")]
+df_bart2$Method <- rep("Modelled", nrow(df_bart2))
+colnames(df_bart2) <- c("Region", "Estimate", "Method")
+
+# combined
+df_bart3 <- rbind(df_bart1, df_bart2)
+df_bart3$Method <- factor(df_bart3$Method, levels = c("Projected", "Modelled"))
+#df_bart3 <- df_bart3[df_bart3$Region != "Centre", ]
+write.csv(df_bart3, file=paste0(bart_results_path_b, "/estimates/modelled.projected.csv"))
+
+```
+
+# ---------------------------------------------bart-forward
+```{r}
+bart_f_mod<-bart_f_mod2
+bart_f_form <- bart_f_form2
+```
+
+```{r posterior and spatial.field}
+#-- extract the posterior ~ of the fixed effects for best model----
+write.csv(bart_f_mod$summary.fixed, file=paste0(bart_results_path_f, "/post.fixed.effects.csv"))
+write.csv(bart_f_mod$summary.hyperpar, file=paste0(bart_results_path_f, "/post.hyperparameter.csv"))
+
+## Remove points not in the study domain
+bart_g.mean <- inla.mesh.project(gproj, bart_f_mod$summary.random$spatial.field$mean)
+bart_g.sd <- inla.mesh.project(gproj,  bart_f_mod$summary.random$spatial.field$sd)
+
+bart_g.mean[!xy.in] <- bart_g.sd[!xy.in] <- NA
+
+library(viridisLite)
+col <- viridis(100)
+spatial.field<-grid.arrange(levelplot(bart_g.mean, scales=list(draw=F), 
+                       xlab='', ylab='', cex.lab=2, 
+                       main='Spatial field Mean',col.regions = col),
+             levelplot(bart_g.sd, scal=list(draw=F), xla='', 
+                       yla='', main='Spatial field SD',
+                       col.regions = col), nrow=1)
+
+ggsave(filename=paste0(bart_results_path_f, "/spatial.field4.png"), plot = spatial.field, width = 6, height = 4, dpi = 300)
+
+##-----------------------------------------
+bart_covars_pred <- data.frame(
+  Intercept = 1,
+  x16 = x16_vec, x11 = x11_vec, x7 =x7_vec, x13 = x13_vec, x1 = x1_vec, x40 = x40_vec)
+
+bart_stk_pred <- inla.stack(
+  data    = list(y = NA),
+  A       = list(A_pred, 1),
+ effects = list(
+  spatial.field = iset$spatial.field,bart_covars_pred),
+  #list(c(list(Intercept=1),  iset),  list(covars_pred) ),
+  tag     = "pred"
+)
+
+bart_stk_all <- inla.stack(bart_stk_est_f, bart_stk_pred)
+bart_mod_pred <- inla(bart_f_form,
+  data = inla.stack.data(bart_stk_all, spde = spde),
+  family = "gamma",
+  control.predictor = list(A = inla.stack.A(bart_stk_all), compute = TRUE),
+  control.mode = list(theta = bart_f_mod$mode$theta, restart = FALSE),
+  verbose = T
+)
+id_pred  <- inla.stack.index(bart_stk_all, "pred")$data
+
+yhat_mean <- bart_mod_pred$summary.fitted.values$mean[id_pred] 
+yhat_sd   <- bart_mod_pred$summary.fitted.values$sd[id_pred]   
+#yhat_low  <- bart_mod_pred$summary.fitted.values$`0.025quant`[id_pred]
+#yhat_high <- bart_mod_pred$summary.fitted.values$`0.975quant`[id_pred]
+
+nx <- length(gproj$x); ny <- length(gproj$y)
+
+yhat_mean_grid <- matrix(NA_real_, nx, ny)
+yhat_sd_grid   <- matrix(NA_real_, nx, ny)
+yhat_low_grid  <- matrix(NA_real_, nx, ny)
+yhat_high_grid <- matrix(NA_real_, nx, ny)
+
+yhat_mean_grid[xy.in] <- yhat_mean
+yhat_sd_grid[xy.in]   <- yhat_sd
+#yhat_low_grid[xy.in]  <- yhat_low
+#yhat_high_grid[xy.in] <- yhat_high
+
+
+library(gridExtra)
+library(viridis)
+
+plt_mean <- levelplot(yhat_mean_grid,
+                      col.regions = inferno(200),
+                      scales = list(draw = FALSE),
+                      xlab = "", ylab = "",
+                      main = "Density Mean")
+
+plt_sd <- levelplot(yhat_sd_grid,
+                    col.regions = inferno(200),
+                    scales = list(draw = FALSE),
+                    xlab = "", ylab = "",
+                    main = "Density SD")
+
+dens.map<- gridExtra::grid.arrange(plt_mean, plt_sd, nrow = 1)
+ggsave(filename=paste0(bart_results_path_f, "/dens.map4.png"), plot = dens.map, width = 6, height = 4, dpi = 300)
+
+
+
+```
+
+```{r CV}
+#| label: CV for spatial model
+
+#-- CV for spatial model-----
+bart_cross_f_validate <- function(dat, n.folds, mod, bart_form, A, seed)
+{
+  N <- nrow(dat)
+  table(ind_train <- factor(sample(x = rep(1:n.folds, each = floor(N / n.folds)),  # Sample IDs for training data
+                                   size = N)))
+  
+  table(as.numeric(ind_train)) 
+  dat$k_fold <- as.numeric(ind_train)
+  coords = cbind(dat$lon, dat$lat)
+  
+  k_uniq <-sort(unique(dat$k_fold))
+  
+  
+  #---------------------------------------------------------------
+  #                   in-sample
+  #---------------------------------------------------------------
+  
+  met_list_in <- list()
+  pred_list_in <- list()
+  for(i in 1:length(k_uniq))
+  {
+    
+    print(paste0("in-sample cross-validation using fold ", i, sep=""))
+    test_ind <- which(dat$k_fold==k_uniq[i])
+    dim(test <- dat[test_ind, ]) #---test set for fold i
+    
+    
+    train_coords <- coords
+    test_coords <- coords[test_ind,]
+    
+    ##--------mean --------------------------------------------------------
+    # spatial random effects based on the full data best model
+    sfield_nodes_mean <- mod$summary.random$spatial.field['mean']
+    field_mean <- (A%*% as.data.frame(sfield_nodes_mean)[, 1])
+    #dim(A);dim(as.data.frame(sfield_nodes_mean))
+    fixed <-  
+     mod$summary.fixed['Intercept', 'mean'] +
+     mod$summary.fixed['x16', 'mean'] * test[,'x16'] +
+     mod$summary.fixed['x11', 'mean'] * test[,'x11'] +
+     mod$summary.fixed['x7', 'mean'] * test[,'x7'] +
+     mod$summary.fixed['x13', 'mean'] * test[,'x13'] +
+     mod$summary.fixed['x40', 'mean'] * test[,'x40'] +
+     mod$summary.fixed['x1', 'mean'] * test[,'x1'] + 
+    # mod$summary.fixed['x25', 'mean'] * test[,'x25'] +
+    # mod$summary.fixed['x43', 'mean'] * test[,'x43'] +
+      rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "mean"]) )+ #---source random effect
+      #rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "mean"])) + #---settlement type and region nested effects 
+      rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "mean"])) + #---set-type random effect
+      rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "mean"])) + #---region random effect
+     
+      mod$summary.random$IDsr['mean'][test_ind,1] + #--uncorrelated spatial random effect
+    
+      field_mean[test_ind,1]
+    
+       dens_ht <- exp(fixed)
+       sum(pop_ht <- dens_ht*test$bld)
+    
+    
+    
+    #### LOWER---------------------------------
+      # spatial random effects based on the full data best model
+       sfield_nodes_lower <- mod$summary.random$spatial.field['0.025quant']
+       field_lower <- (A%*% as.data.frame(sfield_nodes_lower)[, 1])
+       
+    fixedL <-  
+      mod$summary.fixed['Intercept', '0.025quant'] +
+mod$summary.fixed['x16', '0.025quant'] * test[,'x16'] +
+      mod$summary.fixed['x11', '0.025quant'] * test[,'x12'] +
+      mod$summary.fixed['x7', '0.025quant'] * test[,'x7'] +
+      mod$summary.fixed['x13', '0.025quant'] * test[,'x13'] +
+      mod$summary.fixed['x40', '0.025quant'] * test[,'x40'] +
+      mod$summary.fixed['x1', '0.025quant'] * test[,'x1'] + 
+      #mod$summary.fixed['x25', '0.025quant'] * test[,'x25']  +
+     # mod$summary.fixed['x43', '0.025quant'] * test[,'x43'] +
+      
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "0.025quant"])) + #---source random effect
+     #rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "0.025quant"])) + #---settlement type and region nested effects 
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "0.025quant"])) + #---set-type random effect
+     rnorm(nrow(test), 0,sqrt(1/mod$summary.hyperpar["Precision for region", "0.025quant"])) + #---region random effect
+      
+      mod$summary.random$IDsr['0.025quant'][test_ind,1] + #--uncorrelated spatial random effects
+    
+      field_lower[test_ind,1]
+       
+      dens_htL <- exp(fixedL)
+      pop_htL <- dens_htL*test$bld
+    
+    
+    
+    ### upper ---------------------------------------------
+      
+      # spatial random effects based on the full data best model
+      sfield_nodes_upper <- mod$summary.random$spatial.field['0.975quant']
+      field_upper <- (A%*% as.data.frame(sfield_nodes_upper)[, 1])
+      
+      fixedU <-  
+        mod$summary.fixed['Intercept', '0.975quant'] +
+        mod$summary.fixed['x16', '0.975quant'] * test[,'x16'] +
+        mod$summary.fixed['x11', '0.975quant'] * test[,'x11'] +
+        mod$summary.fixed['x7', '0.975quant'] * test[,'x7'] +
+        mod$summary.fixed['x13', '0.975quant'] * test[,'x13'] +
+        mod$summary.fixed['x40', '0.975quant'] * test[,'x40'] +
+        mod$summary.fixed['x1', '0.975quant'] * test[,'x1'] + 
+       # mod$summary.fixed['x25', '0.975quant'] * test[,'x25']  +
+       # mod$summary.fixed['x43', '0.975quant'] * test[,'x43'] +
+        
+       
+      rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "0.975quant"])) + #---source random effect
+     # rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "0.975quant"])) + #---settlement type and region nested effects 
+      rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "0.975quant"])) + #---set-type random effect
+      rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "0.975quant"])) + #---region random effect
+        
+        mod$summary.random$IDsr['0.975quant'][test_ind,1] + #--uncorrelated spatial random effects
+
+      field_upper[test_ind,1]
+      
+      dens_htU <- exp(fixedU)
+      pop_htU <- dens_htU*test$bld
+    
+
+    # calculate fit metrics
+    met_in <- mod_metrics2(test$pop,  
+                           pop_ht)
+    
+    met_list_in[[i]]<- unlist(met_in)
+    pred_list_in[[i]] <- data.frame(obs = test$obs, pred = pop_ht,
+                                    lower = pop_htL,
+                                    upper = pop_htU,
+                                    fold = rep(i, length(test$obs)),
+                                    data = rep("insample", length(test$obs)))
+  }
+  met_list_in_dat <- do.call(rbind,met_list_in) # y , fitted y
+  metrics_in <- apply(met_list_in_dat, 2, mean) #
+  pred_list_in_dat <- do.call(rbind,pred_list_in) # y ,fitted y , lower, upper,fold
+  
+  #-----------------------------------------------------------
+  #               out - of -sample
+  #-----------------------------------------------------------
+  met_list_out <- list()
+  pred_list_out <- list()
+  for(i in 1:length(k_uniq))
+  {
+    
+    print(paste0("out-of-sample cross-validation using fold ", i, sep=""))
+    train_ind <- which(dat$k_fold!=k_uniq[i])
+    test_ind <- which(dat$k_fold==k_uniq[i])
+    dim(train <- dat[train_ind, ])#---train set for fold i
+    dim(test <- dat[test_ind, ]) #---test set for fold i
+    
+    
+    train_coords <- coords[train_ind,]
+    test_coords <- coords[test_ind,]
+    
+    
+    ###---Create projection matrices for training and testing datasets
+    Ae<-inla.spde.make.A(mesh=mesh,loc=as.matrix(train_coords));dim(Ae) #training
+    
+    
+    #####------------------------
+    covars_train <- train[,c("x16", "x11", "x7","x13", "x40", "x1",
+                              "source","IDsr","set_typ","region")];dim(covars_train)#,"set_reg"
+    stk_train <- inla.stack(data=list(y=train$dens), #the response
+                            
+                            A=list(Ae,1),  #the A matrix; the 1 is included to make the list(covariates)
+                            
+                            effects=list(c(list(Intercept=1), #the Intercept
+                                           iset),  #the spatial index
+                                         #the covariates
+                                         list(covars_train)
+                            ), 
+                            tag='train')
+    
+    
+    ###---Rerun INLA for model test prediction
+    model <-inla(bart_form, #the bart_formula
+                 data=inla.stack.data(stk_train,spde=spde),  #the data stack
+                 family= 'gamma',   #which family the data comes from
+                 control.predictor=list(A=inla.stack.A(stk_train),compute=TRUE),  #compute gives you the marginals of the linear predictor
+                 control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+                 verbose = T) #can include verbose=TRUE to see the log of the model runs
+    summary(model)
+    
+    
+    ##--------mean --------------------------------------------------------
+    # spatial random effects based on the full data best model
+    sfield_nodes_mean <- model$summary.random$spatial.field['mean']
+    field_mean <- (A%*% as.data.frame(sfield_nodes_mean)[, 1])
+    
+    fixed <-  
+      model$summary.fixed['Intercept', 'mean'] +
+      model$summary.fixed['x16', 'mean'] * test[,'x16'] +
+      model$summary.fixed['x11', 'mean'] * test[,'x11'] +
+      model$summary.fixed['x7', 'mean'] * test[,'x7'] +
+      model$summary.fixed['x13', 'mean'] * test[,'x13'] +
+      model$summary.fixed['x40', 'mean'] * test[,'x40'] +
+      model$summary.fixed['x1', 'mean'] * test[,'x1'] + 
+     # model$summary.fixed['x25', 'mean'] * test[,'x25']  +
+     # model$summary.fixed['x43', 'mean'] * test[,'x43'] +
+      
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "mean"])) + #---source random effect
+     #rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "mean"])) + #---settlement type and region nested effects 
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "mean"])) + #---set-type random effect
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "mean"])) + #---region random effect
+      
+      mod$summary.random$IDsr['mean'][test_ind,1] + #--uncorrelated spatial random effects
+
+    field_mean[test_ind,1]
+    
+    dens_ht <- exp(fixed)
+    sum(pop_ht <- dens_ht*test$bld)
+    
+    
+    
+    #### LOWER---------------------------------
+    
+    # spatial random effects based on the full data best model
+    sfield_nodes_lower <- model$summary.random$spatial.field['0.025quant']
+    field_lower <- (A%*% as.data.frame(sfield_nodes_lower)[, 1])
+    
+    fixedL <-  
+      model$summary.fixed['Intercept', '0.025quant'] +
+      model$summary.fixed['x16', '0.025quant'] * test[,'x16'] +
+      model$summary.fixed['x11', '0.025quant'] * test[,'x11'] +
+      model$summary.fixed['x7', '0.025quant'] * test[,'x7'] +
+      model$summary.fixed['x13', '0.025quant'] * test[,'x13'] +
+      model$summary.fixed['x40', '0.025quant'] * test[,'x40'] +
+      model$summary.fixed['x1', '0.025quant'] * test[,'x1'] + 
+     # model$summary.fixed['x25', '0.025quant'] * test[,'x25']  +
+     # model$summary.fixed['x43', '0.025quant'] * test[,'x43'] +
+     
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "0.025quant"])) + #---source random effect
+     #rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "0.025quant"])) + #---settlement type and region nested effects 
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "0.025quant"])) + #---set-type random effect
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "0.025quant"])) + #---region random effect
+      
+      mod$summary.random$IDsr['0.025quant'][test_ind,1] + #--uncorrelated spatial random effects
+ 
+    field_lower[test_ind,1]
+    
+    dens_htL <- exp(fixedL)
+    pop_htL <- dens_htL*test$bld
+    
+    
+    
+    ### upper ---------------------------------------------
+    
+    # spatial random effects based on the full data best model
+    sfield_nodes_upper <- model$summary.random$spatial.field['0.975quant']
+    field_upper <- (A%*% as.data.frame(sfield_nodes_upper)[, 1])
+    
+    
+    fixedU <-  
+      model$summary.fixed['Intercept', '0.975quant'] +
+      model$summary.fixed['x16', '0.975quant'] * test[,'x16'] +
+      model$summary.fixed['x11', '0.975quant'] * test[,'x11'] +
+      model$summary.fixed['x7', '0.975quant'] * test[,'x7'] +
+      model$summary.fixed['x13', '0.975quant'] * test[,'x13'] +
+      model$summary.fixed['x40', '0.975quant'] * test[,'x40'] +
+      model$summary.fixed['x1', '0.975quant'] * test[,'x1'] + 
+     # model$summary.fixed['x25', '0.975quant'] * test[,'x25']  +
+     # model$summary.fixed['x43', '0.975quant'] * test[,'x43'] +
+     
+    rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "0.975quant"])) + #---source random effect
+    #rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "0.975quant"])) + #---settlement type and region nested effects 
+    rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "0.975quant"])) + #---set-type random effect
+    rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "0.975quant"])) + #---region random effect
+     
+    mod$summary.random$IDsr['0.975quant'][test_ind,1] + #--uncorrelated spatial random effects
+
+    field_upper[test_ind,1]
+    
+    dens_htU <- exp(fixedU)
+    pop_htU <- dens_htU*test$bld
+    
+
+    # calculate fit metrics
+    met_out <- mod_metrics2(test$pop,  
+                            pop_ht)
+    
+    met_list_out[[i]]<- unlist(met_out)
+    pred_list_out[[i]] <- data.frame(obs = test$obs, pred = pop_ht,
+                                     lower = pop_htL,
+                                     upper = pop_htU,
+                                     fold = rep(i, length(test$obs)),
+                                     data = rep("outsample", length(test$obs)))
+  }
+  met_list_out_dat <- do.call(rbind,met_list_out)
+  metrics_out <- apply(met_list_out_dat, 2, mean) # fit metrics
+  
+  pred_list_out_dat <- do.call(rbind,pred_list_out)# predictions
+  
+  cv_mets <- rbind(metrics_in, metrics_out)
+  output <- list( met_list_in_dat = met_list_in_dat,
+                  met_list_out_dat = met_list_out_dat,
+                  pred_dat = rbind(pred_list_in_dat, pred_list_out_dat),
+                  cv_metrics = rbind(metrics_in, metrics_out))
+}
+
+dat <- dat
+dat$obs <- dat$Imputed_LHHSIZE # observed household size
+
+(bart_cross_f_val <- bart_cross_f_validate(dat, n.folds = 5, 
+                             mod = bart_f_mod, 
+                             bart_form = bart_f_form,
+                             A, 
+                             seed = 35642114))
+
+#bart_cross_f_val$met_list_in_dat  # in-sample metrics per fold 
+#bart_cross_f_val$met_list_out_dat  # out-of-sample metrics per fold
+bart_cross_f_val$cv_metrics    # combined averaged metrics
+bart_cross_f_val$pred_dat  # combined prediction data
+dim(bart_cross_f_val$pred_dat)
+(bart_cross_f_metrics1 <- rbind(bart_cross_f_val$met_list_in_dat,bart_cross_f_val$met_list_out_dat))
+write.csv(bart_cross_f_metrics1, file=paste0(bart_results_path_f, "/bart_folds.csv"))
+```
+
+```{r visualize }
+#-- Scatterplots of spatial model cross-validation results----
+bart_pred.data <- bart_cross_f_val$pred_dat
+bart_pred.data$fold <- factor(bart_pred.data$fold)
+bart_pred.data$data <- factor(bart_pred.data$data,
+                         levels = c("insample", "outsample"),
+                         labels = c("In-Sample", "Out-of-Sample"))
+write.csv(bart_pred.data, file=paste0(bart_results_path_f, "/pre.data.csv"))
+```
+
+```{r prediction}
+#-- for spatial model----
+sim_spatial_bart_f <- function(model, dat, Aprediction, run, inla.seed)
+{
+  fixedeff <- dens_hat <- pop_hat <- matrix(0, nrow=nrow(dat), ncol = run)
+  m1.samp <- inla.posterior.sample(run, model, 
+                                   seed = inla.seed, 
+                                   selection=list(x16 = 1, 
+                                                  x11 = 1, 
+                                                  x7 = 1, 
+                                                  x13 = 1,
+                                                  x40 = 1,
+                                                  x1 = 1
+                                                 # x25 = 1, 
+                                                  #x43 = 1
+                                                 ),
+                                   num.threads="1:1")
+  
+  sfield_nodes_mean <- model$summary.random$spatial.field['mean']
+  field_mean <- (Apred%*% as.data.frame(sfield_nodes_mean)[, 1])
+  for(i in 1:run)
+  {
+    fixedeff[,i] <- 
+      model$summary.fixed['Intercept', 'mean'] +
+      m1.samp[[i]]$latent[1,] * dat[,'x16']  +
+      m1.samp[[i]]$latent[2,] * dat[,'x11']  +
+      m1.samp[[i]]$latent[3,] * dat[,'x7'] +
+      m1.samp[[i]]$latent[4,] * dat[,'x13'] +
+      m1.samp[[i]]$latent[5,] * dat[,'x40'] + 
+      m1.samp[[i]]$latent[6,] * dat[,'x1'] +
+     # m1.samp[[i]]$latent[7,] * dat[,'x25'] +
+     # m1.samp[[i]]$latent[8,] * dat[,'x43'] +
+      
+    rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for IDsr"])) +
+    rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for source"])) +
+    #rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for set_reg"])) + #---settlement type and region nested effects 
+    rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for set_typ"])) + #---set-type random effect
+    rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for region"])) + #---region random effect 
+ 
+      field_mean[,1]
+    
+    
+    dens_hat[,i] <- exp(fixedeff[,i])
+    pop_hat[,i] <- dens_hat[,i]*dat$bld
+    
+  }
+  dat$mean_dens_hat <- apply(dens_hat, 1, mean, na.rm=T) 
+  dat$mean_pop_hat  <- apply(pop_hat, 1, mean, na.rm=T) #
+  dat$lower_pop_hat <- apply(pop_hat, 1, quantile, probs=c(0.025), na.rm=T) #
+  dat$upper_pop_hat <- apply(pop_hat, 1, quantile, probs=c(0.975), na.rm=T) #
+  dat$sd_pop_hat <- apply(pop_hat, 1, sd, na.rm=T) #
+  dat$cv <- dat$sd_pop_hat/dat$mean_pop_hat#
+  
+  output <- list(pop_hat = pop_hat,
+                 est_data = dat)
+  
+}
+
+run=100
+inla.seed = 35642114
+data$bld <- data$CMR_buildings_count
+
+system.time(str(sim.spat_bart_f <- sim_spatial_bart_f(bart_f_mod,data,Apred, run,inla.seed))) 
+sum(sim.spat_bart_f$est_dat$mean_pop_hat,na.rm=T)#sim.spat_bart_f is a list
+#  Join the posterior sample to the prediction data
+names(data)
+data.sim_bart_f <- data.frame(cbind(data[,c("CMR_Regions", "CMR_Department","CMR_Settlement_Classification")], sim.spat_bart_f$pop_hat))
+write.csv(data.sim_bart_f, file=paste0(bart_results_path_f, "/estimates/data.sim.csv"))
+```
+
+```{r Region  estimates}
+(regional.est_bart_f <- regional_est(data.sim_bart_f, 100))
+sum(regional.est_bart_f$total)
+regional.est_bart_f$method <- rep("Proposed", nrow(regional.est_bart_f))
+
+write.csv(regional.est_bart_f, file=paste0(bart_results_path_f, "/estimates/regional_final.csv"))
+
+```
+
+```{r region  Errorplots}
+#| label: plots
+library(dplyr)
+#regional.est_bart_f<-read.csv(file.path(bart_results_path_f,"/estimates/regional_final.csv"))
+regional.est_bart_f$total2 <- round(regional.est_bart_f$total/1000)
+regional.est_bart_f$lower2 <- round(regional.est_bart_f$lower/1000)
+regional.est_bart_f$upper2 <- round(regional.est_bart_f$upper/1000)
+
+pd <- ggplot(regional.est_bart_f, aes(x=reorder(names, -total), 
+                      y=total2)) +
+  geom_errorbar(aes(ymin = lower2, ymax = upper2),
+                position = position_dodge(width = 0.4), width = 0.4,
+                size=0.9)+
+  geom_point(size = 2, color = "red", alpha=0.9) +
+  theme_bw()#+
+  #coord_flip() 
+  
+  
+pdh <- ggpar(pd, ylab="Estimated population count ('000)", xlab="Region",
+              legend = "none", legend.title = "Region:",
+              font.legend=c(14),
+              # font.label = list(size = 12, face = "bold", color ="red"),
+              #palette = "pnj",
+              font.x = c(14),
+              font.y = c(14),
+              font.main=c(14),
+              font.xtickslab =c(12),
+               font.ytickslab =c(14),
+              xtickslab.rt = 45)
+
+pdh
+ggsave(filename=paste0(bart_results_path_f, "/estimates/reginal.est.png"), plot = pdh, width = 6, height = 6, dpi = 300)
+
+#--------------------------------------no y
+pd.1 <- ggplot(regional.est_bart_f, aes(x=reorder(names, -total), 
+                      y=total2)) +
+  geom_errorbar(aes(ymin = lower2, ymax = upper2),
+                position = position_dodge(width = 0.4), width = 0.4,
+                size=0.9)+
+  geom_point(size = 2, color = "red", alpha=0.9) +
+    scale_y_continuous(labels=NULL)+
+  theme_bw()#+
+  #coord_flip() 
+  
+  
+pdh.1 <- ggpar(pd.1, ylab="Estimated population count ('000)", xlab="Region",
+              legend = "none", legend.title = "Region:",
+              font.legend=c(14),
+              # font.label = list(size = 12, face = "bold", color ="red"),
+              #palette = "pnj",
+              font.x = c(14),
+              font.y = c(14),
+              font.main=c(14),
+              font.xtickslab =c(12),
+               font.ytickslab =c(14),
+              xtickslab.rt = 45)
+pdh.1
+
+ggsave(filename=paste0(bart_results_path_f, "/estimates/reginal.est.noy4.png"), plot = pdh.1, width = 6, height = 6, dpi = 300)
+
+```
+
+```{r region  modelled-projected}
+#| label: Compare the projected regional estimates with the modelled
+library(ggplot2)
+library(scales)
+theme_set(theme_classic())
+
+#-- prep data----
+df_bart_f<-df
+names(df_bart_f)
+df_bart_f$NIS.Projected<- df_bart_f$NIS.Projected/1000
+#df_bart_f$total <- df_bart_f$total/1000
+df_bart_f$total <- regional.est_bart_f$total/1000
+
+# Projected 
+df_bart_f1 <- df_bart_f[,c("names", "NIS.Projected")]
+df_bart_f1$Method <- rep("Projected", nrow(df_bart_f1))
+colnames(df_bart_f1) <- c("Region", "Estimate", "Method")
+
+# Modelled 
+df_bart_f2 <- df_bart_f[,c("names", "total")]
+df_bart_f2$Method <- rep("Modelled", nrow(df_bart_f2))
+colnames(df_bart_f2) <- c("Region", "Estimate", "Method")
+
+# combined
+df_bart_f3 <- rbind(df_bart_f1, df_bart_f2)
+df_bart_f3$Method <- factor(df_bart_f3$Method, levels = c("Projected", "Modelled"))
+
+#df_bart_f3 <- df_bart_f3[df_bart_f3$Region != "Centre", ]
+
+write.csv(df_bart_f3, file=paste0(bart_results_path_f, "/estimates/modelled.projected.csv"))
+```
+
+
+# ---------------------------------------------svr-backward
+```{r}
+svr_mod<-svr_mod5
+svr_form <- svr_form5
+```
+
+```{r posterior and spatial.field}
+#-- extract the posterior ~ of the fixed effects for best model----
+#svr_fixed.effects <- round(svr_mod$summary.fixed,4);svr_fixed.effects; svr_mod$summary.hyperpar
+write.csv(svr_mod$summary.fixed, file=paste0(svr_results_path_b, "/post.fixed.effects.csv"))
+write.csv(svr_mod$summary.hyperpar, file=paste0(svr_results_path_b, "/post.hyperpar.csv"))
+
+## Remove points not in the study domain
+svr_g.mean <- inla.mesh.project(gproj, svr_mod$summary.random$spatial.field$mean)
+svr_g.sd <- inla.mesh.project(gproj,  svr_mod$summary.random$spatial.field$sd)
+
+svr_g.mean[!xy.in] <- svr_g.sd[!xy.in] <- NA
+
+library(viridisLite)
+col <- viridis(100)
+spatial.field<-grid.arrange(levelplot(svr_g.mean, scales=list(draw=F), 
+                       xlab='', ylab='', cex.lab=2, 
+                       main='Spatial field Mean',col.regions = col),
+             levelplot(svr_g.sd, scal=list(draw=F), xla='', 
+                       yla='', main='Spatial field SD',
+                       col.regions = col), nrow=1)
+ggsave(filename=paste0(svr_results_path_b, "/spatial.field5.png"), plot = spatial.field, width = 6, height = 4, dpi = 300)
+
+##---------------------------------------------------------
+
+#x13 + x14 + x15 + x9 + x24 + x32 + x40 + x12
+svr_covars_pred <- data.frame(
+  Intercept = 1,
+  x13 = x13_vec, x14 = x14_vec, x15 =x15_vec, x9 = x9_vec, x24 = x24_vec, x32 = x32_vec, x40 = x40_vec, x12 = x12_vec
+)
+
+svr_stk_pred <- inla.stack(
+  data    = list(y = NA),
+  A       = list(A_pred, 1),
+ effects = list(
+  spatial.field = iset$spatial.field,svr_covars_pred),
+  #list(c(list(Intercept=1),  iset),  list(covars_pred) ),
+  tag     = "pred"
+)
+
+svr_stk_all <- inla.stack(svr_stk_est, svr_stk_pred)
+svr_mod_pred <- inla(svr_form,
+  data = inla.stack.data(svr_stk_all, spde = spde),
+  family = "gamma",
+  control.predictor = list(A = inla.stack.A(bart_stk_all), compute = TRUE),
+  control.mode = list(theta = svr_mod$mode$theta, restart = FALSE),
+  verbose = T
+)
+id_pred  <- inla.stack.index(svr_stk_all, "pred")$data
+
+yhat_mean <- svr_mod_pred$summary.fitted.values$mean[id_pred]  
+yhat_sd   <- svr_mod_pred$summary.fitted.values$sd[id_pred]  
+#yhat_low  <- svr_mod_pred$summary.fitted.values$`0.025quant`[id_pred]
+#yhat_high <- svr_mod_pred$summary.fitted.values$`0.975quant`[id_pred]
+
+nx <- length(gproj$x); ny <- length(gproj$y)
+
+yhat_mean_grid <- matrix(NA_real_, nx, ny)
+yhat_sd_grid   <- matrix(NA_real_, nx, ny)
+yhat_low_grid  <- matrix(NA_real_, nx, ny)
+yhat_high_grid <- matrix(NA_real_, nx, ny)
+
+yhat_mean_grid[xy.in] <- yhat_mean
+yhat_sd_grid[xy.in]   <- yhat_sd
+#yhat_low_grid[xy.in]  <- yhat_low
+#yhat_high_grid[xy.in] <- yhat_high
+
+
+library(gridExtra)
+library(viridis)
+
+plt_mean <- levelplot(yhat_mean_grid,
+                      col.regions = inferno(200),
+                      scales = list(draw = FALSE),
+                      xlab = "", ylab = "",
+                      main = "Density Mean")
+
+plt_sd <- levelplot(yhat_sd_grid,
+                    col.regions = inferno(200),
+                    scales = list(draw = FALSE),
+                    xlab = "", ylab = "",
+                    main = "Density SD")
+
+dens.map<- gridExtra::grid.arrange(plt_mean, plt_sd, nrow = 1)
+ggsave(filename=paste0(svr_results_path_b, "/dens.map5.png"), plot = dens.map, width = 6, height = 4, dpi = 300)
+
+
+```
+
+```{r CV}
+#| label: CV for spatial model
+svr_cross_validate <- function(dat, n.folds, mod, svr_form, A, seed)
+{
+  N <- nrow(dat)
+  table(ind_train <- factor(sample(x = rep(1:n.folds, each = floor(N / n.folds)),  # Sample IDs for training data
+                                   size = N)))
+  
+  table(as.numeric(ind_train)) 
+  dat$k_fold <- as.numeric(ind_train)
+  coords = cbind(dat$lon, dat$lat)
+  
+  k_uniq <-sort(unique(dat$k_fold))
+  
+  
+  #---------------------------------------------------------------
+  #                   in-sample
+  #---------------------------------------------------------------
+  
+  met_list_in <- list()
+  pred_list_in <- list()
+  for(i in 1:length(k_uniq))
+  {
+    
+    print(paste0("in-sample cross-validation using fold ", i, sep=""))
+    test_ind <- which(dat$k_fold==k_uniq[i])
+    dim(test <- dat[test_ind, ]) #---test set for fold i
+    
+    
+    train_coords <- coords
+    test_coords <- coords[test_ind,]
+    
+    ##--------mean --------------------------------------------------------
+    # spatial random effects based on the full data best model
+    sfield_nodes_mean <- mod$summary.random$spatial.field['mean']
+    field_mean <- (A%*% as.data.frame(sfield_nodes_mean)[, 1])
+    #dim(A);dim(as.data.frame(sfield_nodes_mean))
+   fixed <-  
+     mod$summary.fixed['Intercept', 'mean'] +
+     mod$summary.fixed['x13', 'mean'] * test[,'x13'] +
+     mod$summary.fixed['x14', 'mean'] * test[,'x14'] +
+     mod$summary.fixed['x15', 'mean'] * test[,'x15'] +
+     mod$summary.fixed['x9', 'mean'] * test[,'x9'] +
+     mod$summary.fixed['x24', 'mean'] * test[,'x24'] +
+     mod$summary.fixed['x32', 'mean'] * test[,'x32'] + 
+     mod$summary.fixed['x40', 'mean'] * test[,'x40']  +
+     mod$summary.fixed['x12', 'mean'] * test[,'x12'] +
+      rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "mean"])) + #---source random effect
+      rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "mean"])) + #---settlement type and region nested effects 
+      rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "mean"])) + #---set-type random effect
+      rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "mean"])) + #---region random effect
+     
+      mod$summary.random$IDsr['mean'][test_ind,1] + #--uncorrelated spatial random effect
+    
+      field_mean[test_ind,1]
+    
+       dens_ht <- exp(fixed)
+       sum(pop_ht <- dens_ht*test$bld)
+    
+    
+    
+    #### LOWER---------------------------------
+      # spatial random effects based on the full data best model
+       sfield_nodes_lower <- mod$summary.random$spatial.field['0.025quant']
+       field_lower <- (A%*% as.data.frame(sfield_nodes_lower)[, 1])
+       
+  fixedL <-  
+      mod$summary.fixed['Intercept', '0.025quant'] +
+     mod$summary.fixed['x13', '0.025quant'] * test[,'x13'] +
+     mod$summary.fixed['x14', '0.025quant'] * test[,'x14'] +
+     mod$summary.fixed['x15', '0.025quant'] * test[,'x15'] +
+     mod$summary.fixed['x9', '0.025quant'] * test[,'x9'] +
+     mod$summary.fixed['x24', '0.025quant'] * test[,'x24'] +
+     mod$summary.fixed['x32', '0.025quant'] * test[,'x32'] + 
+     mod$summary.fixed['x40', '0.025quant'] * test[,'x40']  +
+     mod$summary.fixed['x12', '0.025quant'] * test[,'x12'] +
+      
+     
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "0.025quant"])) + #---source random effect
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "0.025quant"])) + #---settlement type and region nested effects 
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "0.025quant"])) + #---set-type random effect
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "0.025quant"])) + #---region random effect
+      
+      mod$summary.random$IDsr['0.025quant'][test_ind,1] + #--uncorrelated spatial random effects
+    
+      field_lower[test_ind,1]
+       
+      dens_htL <- exp(fixedL)
+      pop_htL <- dens_htL*test$bld
+    
+    
+    
+    ### upper ---------------------------------------------
+      
+      # spatial random effects based on the full data best model
+      sfield_nodes_upper <- mod$summary.random$spatial.field['0.975quant']
+      field_upper <- (A%*% as.data.frame(sfield_nodes_upper)[, 1])
+      
+       fixedU <-  
+        mod$summary.fixed['Intercept', '0.975quant'] +
+     mod$summary.fixed['x13', '0.975quant'] * test[,'x13'] +
+     mod$summary.fixed['x14', '0.975quant'] * test[,'x14'] +
+     mod$summary.fixed['x15', '0.975quant'] * test[,'x15'] +
+     mod$summary.fixed['x9', '0.975quant'] * test[,'x9'] +
+     mod$summary.fixed['x24', '0.975quant'] * test[,'x24'] +
+     mod$summary.fixed['x32', '0.975quant'] * test[,'x32'] + 
+     mod$summary.fixed['x40', '0.975quant'] * test[,'x40']  +
+     mod$summary.fixed['x12', '0.975quant'] * test[,'x12'] +
+        
+       
+       rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "0.975quant"])) + #---source random effect
+       rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "0.975quant"])) + #---settlement type and region nested effects 
+       rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "0.975quant"])) + #---set-type random effect
+       rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "0.975quant"])) + #---region random effect
+        
+        mod$summary.random$IDsr['0.975quant'][test_ind,1] + #--uncorrelated spatial random effects
+
+      field_upper[test_ind,1]
+      
+      dens_htU <- exp(fixedU)
+      pop_htU <- dens_htU*test$bld
+
+    # calculate fit metrics
+    met_in <- mod_metrics2(test$pop,  
+                           pop_ht)
+    
+    met_list_in[[i]]<- unlist(met_in)
+    pred_list_in[[i]] <- data.frame(obs = test$obs, pred = pop_ht,
+                                    lower = pop_htL,
+                                    upper = pop_htU,
+                                    fold = rep(i, length(test$obs)),
+                                    data = rep("insample", length(test$obs)))
+  }
+  met_list_in_dat <- do.call(rbind,met_list_in) # y , fitted y
+  metrics_in <- apply(met_list_in_dat, 2, mean) #
+  pred_list_in_dat <- do.call(rbind,pred_list_in) # y ,fitted y , lower, upper,fold
+  
+  #-----------------------------------------------------------
+  #               out - of -sample
+  #-----------------------------------------------------------
+  met_list_out <- list()
+  pred_list_out <- list()
+  for(i in 1:length(k_uniq))
+  {
+    
+    print(paste0("out-of-sample cross-validation using fold ", i, sep=""))
+    train_ind <- which(dat$k_fold!=k_uniq[i])
+    test_ind <- which(dat$k_fold==k_uniq[i])
+    dim(train <- dat[train_ind, ])#---train set for fold i
+    dim(test <- dat[test_ind, ]) #---test set for fold i
+    
+    
+    train_coords <- coords[train_ind,]
+    test_coords <- coords[test_ind,]
+    
+    
+    ###---Create projection matrices for training and testing datasets
+    Ae<-inla.spde.make.A(mesh=mesh,loc=as.matrix(train_coords));dim(Ae) #training
+    
+    
+    #####------------------------
+     covars_train <- train[,c("x13", "x14", "x15", "x9", "x24", "x32", "x40",
+                             "x12", "set_reg" , "source","IDsr","set_typ","region")]; dim(covars_train)#
+    stk_train <- inla.stack(data=list(y=train$dens), #the response
+                            
+                            A=list(Ae,1),  #the A matrix; the 1 is included to make the list(covariates)
+                            
+                            effects=list(c(list(Intercept=1), #the Intercept
+                                           iset),  #the spatial index
+                                         #the covariates
+                                         list(covars_train)
+                            ), 
+                            tag='train')
+    
+    
+    ###---Rerun INLA for model test prediction
+    model <-inla(svr_form, #the svr_formula
+                 data=inla.stack.data(stk_train,spde=spde),  #the data stack
+                 family= 'gamma',   #which family the data comes from
+                 control.predictor=list(A=inla.stack.A(stk_train),compute=TRUE),  #compute gives you the marginals of the linear predictor
+                 control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+                 verbose = T) #can include verbose=TRUE to see the log of the model runs
+    summary(model)
+    
+    
+    ##--------mean --------------------------------------------------------
+    # spatial random effects based on the full data best model
+    sfield_nodes_mean <- model$summary.random$spatial.field['mean']
+    field_mean <- (A%*% as.data.frame(sfield_nodes_mean)[, 1])
+    
+   fixed <-  
+      model$summary.fixed['Intercept', 'mean'] +
+     model$summary.fixed['x13', 'mean'] * test[,'x13'] +
+     model$summary.fixed['x14', 'mean'] * test[,'x14'] +
+     model$summary.fixed['x15', 'mean'] * test[,'x15'] +
+     model$summary.fixed['x9', 'mean'] * test[,'x9'] +
+     model$summary.fixed['x24', 'mean'] * test[,'x24'] +
+     model$summary.fixed['x32', 'mean'] * test[,'x32'] + 
+     model$summary.fixed['x40', 'mean'] * test[,'x40']  +
+     model$summary.fixed['x12', 'mean'] * test[,'x12'] +
+      
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "mean"])) + #---source random effect
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "mean"])) + #---settlement type and region nested effects 
+    rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "mean"])) + #---set-type random effect
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "mean"])) + #---region random effect
+      
+      mod$summary.random$IDsr['mean'][test_ind,1] + #--uncorrelated spatial random effects
+
+    field_mean[test_ind,1]
+    
+    dens_ht <- exp(fixed)
+    sum(pop_ht <- dens_ht*test$bld)
+    
+    
+    
+    #### LOWER---------------------------------
+    
+    # spatial random effects based on the full data best model
+    sfield_nodes_lower <- model$summary.random$spatial.field['0.025quant']
+    field_lower <- (A%*% as.data.frame(sfield_nodes_lower)[, 1])
+    
+   fixedL <-  
+      model$summary.fixed['Intercept', '0.025quant'] +
+     model$summary.fixed['x13', '0.025quant'] * test[,'x13'] +
+     model$summary.fixed['x14', '0.025quant'] * test[,'x14'] +
+     model$summary.fixed['x15', '0.025quant'] * test[,'x15'] +
+     model$summary.fixed['x9', '0.025quant'] * test[,'x9'] +
+     model$summary.fixed['x24', '0.025quant'] * test[,'x24'] +
+     model$summary.fixed['x32', '0.025quant'] * test[,'x32'] + 
+     model$summary.fixed['x40', '0.025quant'] * test[,'x40']  +
+     model$summary.fixed['x12', '0.025quant'] * test[,'x12'] +
+     
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "0.025quant"])) + #---source random effect
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "0.025quant"])) + #---settlement type and region nested effects 
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "0.025quant"])) + #---set-type random effect
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "0.025quant"])) + #---region random effect
+      
+      mod$summary.random$IDsr['0.025quant'][test_ind,1] + #--uncorrelated spatial random effects
+ 
+    field_lower[test_ind,1]
+    
+    dens_htL <- exp(fixedL)
+    pop_htL <- dens_htL*test$bld
+    
+    
+    
+    ### upper ---------------------------------------------
+    
+    # spatial random effects based on the full data best model
+    sfield_nodes_upper <- model$summary.random$spatial.field['0.975quant']
+    field_upper <- (A%*% as.data.frame(sfield_nodes_upper)[, 1])
+    
+    
+   fixedU <-  
+      model$summary.fixed['Intercept', '0.975quant'] +
+     model$summary.fixed['x13', '0.975quant'] * test[,'x13'] +
+     model$summary.fixed['x14', '0.975quant'] * test[,'x14'] +
+     model$summary.fixed['x15', '0.975quant'] * test[,'x15'] +
+     model$summary.fixed['x9', '0.975quant'] * test[,'x9'] +
+     model$summary.fixed['x24', '0.975quant'] * test[,'x24'] +
+     model$summary.fixed['x32', '0.975quant'] * test[,'x32'] + 
+     model$summary.fixed['x40', '0.975quant'] * test[,'x40']  +
+     model$summary.fixed['x12', '0.975quant'] * test[,'x12'] +
+     
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "0.975quant"])) + #---source random effect
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "0.975quant"])) + #---settlement type and region nested effects 
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "0.975quant"])) + #---set-type random effect
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "0.975quant"])) + #---region random effect
+     
+      mod$summary.random$IDsr['0.975quant'][test_ind,1] + #--uncorrelated spatial random effects
+
+    field_upper[test_ind,1]
+    
+    dens_htU <- exp(fixedU)
+    pop_htU <- dens_htU*test$bld
+    
+  
+    # calculate fit metrics
+    met_out <- mod_metrics2(test$pop,  
+                            pop_ht)
+    
+    met_list_out[[i]]<- unlist(met_out)
+    pred_list_out[[i]] <- data.frame(obs = test$obs, pred = pop_ht,
+                                     lower = pop_htL,
+                                     upper = pop_htU,
+                                     fold = rep(i, length(test$obs)),
+                                     data = rep("outsample", length(test$obs)))
+  }
+  met_list_out_dat <- do.call(rbind,met_list_out)
+  metrics_out <- apply(met_list_out_dat, 2, mean) # fit metrics
+  
+  pred_list_out_dat <- do.call(rbind,pred_list_out)# predictions
+  
+  cv_mets <- rbind(metrics_in, metrics_out)
+  output <- list( met_list_in_dat = met_list_in_dat,
+                  met_list_out_dat = met_list_out_dat,
+                  pred_dat = rbind(pred_list_in_dat, pred_list_out_dat),
+                  cv_metrics = rbind(metrics_in, metrics_out))
+}
+
+dat <- dat
+dat$obs <- dat$Imputed_LHHSIZE # observed household size
+
+(svr_cross_val <- svr_cross_validate(dat, n.folds = 5, 
+                             mod = svr_mod, 
+                             svr_form = svr_form,
+                             A, 
+                             seed = 35642114))
+
+#svr_cross_val$met_list_in_dat  # in-sample metrics per fold 
+#svr_cross_val$met_list_out_dat  # out-of-sample metrics per fold
+svr_cross_val$cv_metrics    # combined averaged metrics
+svr_cross_val$pred_dat  # combined prediction data
+dim(svr_cross_val$pred_dat)
+(cross_svr_metrics <- rbind(svr_cross_val$met_list_in_dat, svr_cross_val$met_list_out_dat))
+write.csv(cross_svr_metrics , file=paste0(svr_results_path_b, "/folds.csv"))
+```
+
+```{r visualize}
+#-- Scatterplots of spatial model cross-validation results----
+svr_pred.data <- svr_cross_val$pred_dat
+svr_pred.data$fold <- factor(svr_pred.data$fold)
+svr_pred.data$data <- factor(svr_pred.data$data,
+                         levels = c("insample", "outsample"),
+                         labels = c("In-Sample", "Out-of-Sample"))
+
+write.csv(svr_pred.data , file=paste0(svr_results_path_b, "/pre.data.csv"))
+
+#ggsave(filename=paste0(svr_results_path_b, "/spatial.cv.png"), plot = spatial.cv, width = 6, height = 6, dpi = 300)
+```
+
+```{r Prediction}
+#-- for spatial model----
+sim_spatial_svr <- function(model, dat, Aprediction, run, inla.seed)
+{
+  fixedeff <- dens_hat <- pop_hat <- matrix(0, nrow=nrow(dat), ncol = run)
+
+  m1.samp <- inla.posterior.sample(run, model, 
+                                   seed = inla.seed, 
+                                   selection=list(x13 = 1, 
+                                                  x14 = 1, 
+                                                  x15 = 1, 
+                                                  x9 = 1,
+                                                  x24 = 1,
+                                                  x32 = 1,
+                                                  x40= 1, 
+                                                  x12 = 1),
+                                   num.threads="1:1")
+  
+  sfield_nodes_mean <- model$summary.random$spatial.field['mean']
+  field_mean <- (Apred%*% as.data.frame(sfield_nodes_mean)[, 1])
+  for(i in 1:run)
+  {
+    fixedeff[,i] <- 
+      model$summary.fixed['Intercept', 'mean'] +
+      m1.samp[[i]]$latent[1,] * dat[,'x13']  +
+      m1.samp[[i]]$latent[2,] * dat[,'x14'] +
+      m1.samp[[i]]$latent[3,] * dat[,'x15'] +
+      m1.samp[[i]]$latent[4,] * dat[,'x9'] + 
+      m1.samp[[i]]$latent[5,] * dat[,'x24'] +
+     m1.samp[[i]]$latent[6,] * dat[,'x32'] +
+      m1.samp[[i]]$latent[7,] * dat[,'x40'] +
+      m1.samp[[i]]$latent[8,] * dat[,'x12']  +
+      
+     rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for IDsr"])) +
+     rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for source"])) +
+     rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for set_reg"])) + #---settlement type and region nested effects 
+     rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for set_typ"])) + #---set-type random effect
+     rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for region"])) + #---region random effect 
+
+      field_mean[,1]
+    
+    
+    dens_hat[,i] <- exp(fixedeff[,i])
+    pop_hat[,i] <- dens_hat[,i]*dat$bld
+    
+  }
+  dat$mean_dens_hat <- apply(dens_hat, 1, mean, na.rm=T) 
+  dat$mean_pop_hat  <- apply(pop_hat, 1, mean, na.rm=T) #
+  dat$lower_pop_hat <- apply(pop_hat, 1, quantile, probs=c(0.025), na.rm=T) #
+  dat$upper_pop_hat <- apply(pop_hat, 1, quantile, probs=c(0.975), na.rm=T) #
+  dat$sd_pop_hat <- apply(pop_hat, 1, sd, na.rm=T) #
+  dat$cv <- dat$sd_pop_hat/dat$mean_pop_hat#
+  
+  output <- list(pop_hat = pop_hat,
+                 est_data = dat)
+  
+}
+
+run=100
+inla.seed = 35642114
+data$bld <- data$CMR_buildings_count
+
+system.time(str(sim.spat_svr <- sim_spatial_svr(svr_mod,data,Apred, run, inla.seed))) 
+sum(sim.spat_svr$est_dat$mean_pop_hat,na.rm=T)#sim.spat_svr is a list
+
+#  Join the posterior sample to the prediction data
+data.sim_svr <- data.frame(cbind(data[,c("CMR_Regions", "CMR_Department","CMR_Settlement_Classification")], sim.spat_svr$pop_hat))
+write.csv(data.sim_svr, file=paste0(svr_results_path_b, "/estimates/data.sim.csv"))
+```
+
+```{r Region estimates}
+(regional.est_svr <- regional_est(data.sim_svr, 100))
+sum(regional.est_svr$total)
+regional.est_svr$method <- rep("Proposed", nrow(regional.est_svr))
+
+write.csv(regional.est_svr, file=paste0(svr_results_path_b, "/estimates/regional_final.csv"))
+```
+
+# notice if any uncertainty is too big!!!
+```{r region  Errorplots}
+library(dplyr)
+#regional.est_svr<-read.csv(file.path(svr_results_path_b,"/estimates/regional_final.csv"))
+#---------------------------original
+regional.est_svr$total2 <- round(regional.est_svr$total/1000)
+regional.est_svr$lower2 <- round(regional.est_svr$lower/1000)
+regional.est_svr$upper2 <- round(regional.est_svr$upper/1000)
+
+pd <- ggplot(regional.est_svr, aes(x=reorder(names, -total), 
+                      y=total2)) +
+  geom_errorbar(aes(ymin = lower2, ymax = upper2),
+                position = position_dodge(width = 0.4), width = 0.4,
+                size=0.9)+
+  geom_point(size = 2, color = "red", alpha=0.9) +
+  theme_bw()#+
+  #coord_flip() 
+  
+  
+pdh <- ggpar(pd, ylab="Estimated population count ('000)", xlab="Region",
+              legend = "none", legend.title = "Region:",
+              font.legend=c(14),
+              # font.label = list(size = 12, face = "bold", color ="red"),
+              #palette = "pnj",
+              font.x = c(14),
+              font.y = c(14),
+              font.main=c(14),
+              font.xtickslab =c(12),
+               font.ytickslab =c(14),
+              xtickslab.rt = 45)
+
+pdh
+ggsave(filename=paste0(svr_results_path_b, "/estimates/reginal.est.original.png"), plot = pdh, width = 6, height = 6, dpi = 300)
+
+#--------------------------------no centre
+regional.est_svr1<-regional.est_svr
+
+regional.est_svr1 <- regional.est_svr1[regional.est_svr1$names != "Centre", ]
+
+regional.est_svr1$total2 <- round(regional.est_svr1$total/1000)
+regional.est_svr1$lower2 <- round(regional.est_svr1$lower/1000)
+regional.est_svr1$upper2 <- round(regional.est_svr1$upper/1000)
+
+pd.1 <- ggplot(regional.est_svr1, aes(x=reorder(names, -total), 
+                      y=total2)) +
+  geom_errorbar(aes(ymin = lower2, ymax = upper2),
+                position = position_dodge(width = 0.4), width = 0.4,
+                size=0.9)+
+  geom_point(size = 2, color = "red", alpha=0.9) +
+  theme_bw()#+
+  #coord_flip() 
+  
+  
+pdh.1 <- ggpar(pd.1, ylab="Estimated population count ('000)", xlab="Region (without Centre)",
+              legend = "none", legend.title = "Region:",
+              font.legend=c(14),
+              # font.label = list(size = 12, face = "bold", color ="red"),
+              #palette = "pnj",
+              font.x = c(14),
+              font.y = c(14),
+              font.main=c(14),
+              font.xtickslab =c(12),
+               font.ytickslab =c(14),
+              xtickslab.rt = 45)
+
+pdh.1
+ggsave(filename=paste0(svr_results_path_b, "/estimates/reginal.est.1.png"), plot = pdh.1, width = 6, height = 6, dpi = 300)
+
+#------------------------------------no y
+pd.2 <- ggplot(regional.est_svr1, aes(x=reorder(names, -total), 
+                      y=total2)) +
+  geom_errorbar(aes(ymin = lower2, ymax = upper2),
+                position = position_dodge(width = 0.4), width = 0.4,
+                size=0.9)+
+  geom_point(size = 2, color = "red", alpha=0.9) +
+    scale_y_continuous(labels=NULL)+
+  theme_bw()#+
+  #coord_flip() 
+  
+  
+pdh.2 <- ggpar(pd.2, ylab="Estimated population count ('000)", xlab="Region (without Centre)",
+              legend = "none", legend.title = "Region:",
+              font.legend=c(14),
+              # font.label = list(size = 12, face = "bold", color ="red"),
+              #palette = "pnj",
+              font.x = c(14),
+              font.y = c(14),
+              font.main=c(14),
+              font.xtickslab =c(12),
+               font.ytickslab =c(14),
+              xtickslab.rt = 45)
+pdh.2
+
+ggsave(filename=paste0(svr_results_path_b, "/estimates/reginal.est.noy5.png"), plot = pdh.2, width = 6, height = 6, dpi = 300)
+
+```
+
+```{r region  modelled-projected}
+#| label: Compare the projected regional estimates with the modelled
+library(ggplot2)
+library(scales)
+theme_set(theme_classic())
+
+#-- prep data----
+df_svr<-df
+names(df_svr)
+df_svr$NIS.Projected<- df_svr$NIS.Projected/1000
+#df_svr$total <- df_svr$total/1000
+df_svr$total <- regional.est_svr$total/1000
+
+# Projected 
+df_svr1 <- df_svr[,c("names", "NIS.Projected")]
+df_svr1$Method <- rep("Projected", nrow(df_svr1))
+colnames(df_svr1) <- c("Region", "Estimate", "Method")
+
+# Modelled 
+df_svr2 <- df_svr[,c("names", "total")]
+df_svr2$Method <- rep("Modelled", nrow(df_svr2))
+colnames(df_svr2) <- c("Region", "Estimate", "Method")
+
+# combined
+df_svr3 <- rbind(df_svr1, df_svr2)
+df_svr3$Method <- factor(df_svr3$Method, levels = c("Projected", "Modelled"))
+
+write.csv(df_svr3, file=paste0(svr_results_path_b, "/estimates/modelled_projected.csv"))
+
+```
+
+
+# ---------------------------------------------svr-forward
+```{r}
+svr_f_mod<-svr_f_mod5
+svr_f_form <- svr_f_form5
+```
+
+```{r posterior and spatial.field}
+#-- extract the posterior ~ of the fixed effects for best model----
+write.csv(svr_f_mod$summary.fixed, file=paste0(svr_results_path_f, "/post.fixed.effects.csv"))
+write.csv(svr_f_mod$summary.hyperpar, file=paste0(svr_results_path_f, "/post.hyperparameter.csv"))
+
+## Remove points not in the study domain
+svr_g.mean <- inla.mesh.project(gproj, svr_f_mod$summary.random$spatial.field$mean)
+svr_g.sd <- inla.mesh.project(gproj,  svr_f_mod$summary.random$spatial.field$sd)
+
+svr_g.mean[!xy.in] <- svr_g.sd[!xy.in] <- NA
+
+library(viridisLite)
+col <- viridis(100)
+spatial.field<-grid.arrange(levelplot(svr_g.mean, scales=list(draw=F), 
+                       xlab='', ylab='', cex.lab=2, 
+                       main='Spatial field Mean',col.regions = col),
+             levelplot(svr_g.sd, scal=list(draw=F), xla='', 
+                       yla='', main='Spatial field SD',
+                       col.regions = col), nrow=1)
+ggsave(filename=paste0(svr_results_path_f, "/spatial.field6.png"), plot = spatial.field, width = 6, height = 4, dpi = 300)
+
+##---------------------------------------------------------
+
+svr_covars_pred <- data.frame(
+  Intercept = 1,
+  x13 = x13_vec, x14 = x14_vec, x15 =x15_vec, x9 = x9_vec, x24 = x24_vec, x32 = x32_vec)
+
+svr_stk_pred <- inla.stack(
+  data    = list(y = NA),
+  A       = list(A_pred, 1),
+ effects = list(
+  spatial.field = iset$spatial.field,svr_covars_pred),
+  #list(c(list(Intercept=1),  iset),  list(covars_pred) ),
+  tag     = "pred"
+)
+
+svr_stk_all <- inla.stack(svr_stk_est, svr_stk_pred)
+svr_mod_pred <- inla(svr_f_form,
+  data = inla.stack.data(svr_stk_all, spde = spde),
+  family = "gamma",
+  control.predictor = list(A = inla.stack.A(bart_stk_all), compute = TRUE),
+  control.mode = list(theta = svr_f_mod$mode$theta, restart = FALSE),
+  verbose = T
+)
+id_pred  <- inla.stack.index(svr_stk_all, "pred")$data
+
+yhat_mean <- svr_mod_pred$summary.fitted.values$mean[id_pred]  
+yhat_sd   <- svr_mod_pred$summary.fitted.values$sd[id_pred]    
+#yhat_low  <- svr_mod_pred$summary.fitted.values$`0.025quant`[id_pred]
+#yhat_high <- svr_mod_pred$summary.fitted.values$`0.975quant`[id_pred]
+
+nx <- length(gproj$x); ny <- length(gproj$y)
+
+yhat_mean_grid <- matrix(NA_real_, nx, ny)
+yhat_sd_grid   <- matrix(NA_real_, nx, ny)
+yhat_low_grid  <- matrix(NA_real_, nx, ny)
+yhat_high_grid <- matrix(NA_real_, nx, ny)
+
+yhat_mean_grid[xy.in] <- yhat_mean
+yhat_sd_grid[xy.in]   <- yhat_sd
+#yhat_low_grid[xy.in]  <- yhat_low
+#yhat_high_grid[xy.in] <- yhat_high
+
+
+library(gridExtra)
+library(viridis)
+
+plt_mean <- levelplot(yhat_mean_grid,
+                      col.regions = inferno(200),
+                      scales = list(draw = FALSE),
+                      xlab = "", ylab = "",
+                      main = "Density Mean")
+
+plt_sd <- levelplot(yhat_sd_grid,
+                    col.regions = inferno(200),
+                    scales = list(draw = FALSE),
+                    xlab = "", ylab = "",
+                    main = "Density SD")
+
+dens.map<- gridExtra::grid.arrange(plt_mean, plt_sd, nrow = 1)
+ggsave(filename=paste0(svr_results_path_f, "/dens.map6.png"), plot = dens.map, width = 6, height = 4, dpi = 300)
+
+
+```
+
+```{r CV}
+#| label: CV for spatial model
+
+#-- CV for spatial model-----
+svr_cross_f_validate <- function(dat, n.folds, mod, svr_form, A, seed)
+{
+
+  N <- nrow(dat)
+
+  table(ind_train <- factor(sample(x = rep(1:n.folds, each = floor(N / n.folds)),  # Sample IDs for training data
+                                   size = N)))
+  
+  table(as.numeric(ind_train)) 
+  dat$k_fold <- as.numeric(ind_train)
+  coords = cbind(dat$lon, dat$lat)
+  
+  k_uniq <-sort(unique(dat$k_fold))
+  
+  
+  #---------------------------------------------------------------
+  #                   in-sample
+  #---------------------------------------------------------------
+  
+  met_list_in <- list()
+  pred_list_in <- list()
+  for(i in 1:length(k_uniq))
+  {
+    
+    print(paste0("in-sample cross-validation using fold ", i, sep=""))
+    test_ind <- which(dat$k_fold==k_uniq[i])
+    dim(test <- dat[test_ind, ]) #---test set for fold i
+    
+    
+    train_coords <- coords
+    test_coords <- coords[test_ind,]
+    
+    ##--------mean --------------------------------------------------------
+    # spatial random effects based on the full data best model
+    sfield_nodes_mean <- mod$summary.random$spatial.field['mean']
+    field_mean <- (A%*% as.data.frame(sfield_nodes_mean)[, 1])
+    #dim(A);dim(as.data.frame(sfield_nodes_mean))
+   fixed <-  
+     mod$summary.fixed['Intercept', 'mean'] +
+      mod$summary.fixed['x13', 'mean'] * test[,'x13'] +
+     mod$summary.fixed['x14', 'mean'] * test[,'x14'] +
+     mod$summary.fixed['x15', 'mean'] * test[,'x15'] +
+     mod$summary.fixed['x9', 'mean'] * test[,'x9'] +
+     mod$summary.fixed['x24', 'mean'] * test[,'x24'] +
+     mod$summary.fixed['x32', 'mean'] * test[,'x32'] + 
+    
+      rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "mean"])) + #---source random effect
+      rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "mean"])) + #---settlement type and region nested effects 
+      rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "mean"])) + #---set-type random effect
+      rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "mean"])) + #---region random effect
+     
+      mod$summary.random$IDsr['mean'][test_ind,1] + #--uncorrelated spatial random effect
+    
+      field_mean[test_ind,1]
+    
+       dens_ht <- exp(fixed)
+       sum(pop_ht <- dens_ht*test$bld)
+    
+    
+    
+    #### LOWER---------------------------------
+      # spatial random effects based on the full data best model
+       sfield_nodes_lower <- mod$summary.random$spatial.field['0.025quant']
+       field_lower <- (A%*% as.data.frame(sfield_nodes_lower)[, 1])
+       
+  fixedL <-  
+      mod$summary.fixed['Intercept', '0.025quant'] +
+     mod$summary.fixed['x13', '0.025quant'] * test[,'x13'] +
+     mod$summary.fixed['x14', '0.025quant'] * test[,'x14'] +
+     mod$summary.fixed['x15', '0.025quant'] * test[,'x15'] +
+     mod$summary.fixed['x9', '0.025quant'] * test[,'x9'] +
+     mod$summary.fixed['x24', '0.025quant'] * test[,'x24'] +
+     mod$summary.fixed['x32', '0.025quant'] * test[,'x32'] + 
+      
+     
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "0.025quant"])) + #---source random effect
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "0.025quant"])) + #---settlement type and region nested effects 
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "0.025quant"])) + #---set-type random effect
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "0.025quant"])) + #---region random effect
+      
+      mod$summary.random$IDsr['0.025quant'][test_ind,1] + #--uncorrelated spatial random effects
+    
+      field_lower[test_ind,1]
+       
+      dens_htL <- exp(fixedL)
+      pop_htL <- dens_htL*test$bld
+    
+    
+    
+    ### upper ---------------------------------------------
+      
+      # spatial random effects based on the full data best model
+      sfield_nodes_upper <- mod$summary.random$spatial.field['0.975quant']
+      field_upper <- (A%*% as.data.frame(sfield_nodes_upper)[, 1])
+      
+       fixedU <-  
+        mod$summary.fixed['Intercept', '0.975quant'] +
+     mod$summary.fixed['x13', '0.975quant'] * test[,'x13'] +
+     mod$summary.fixed['x14', '0.975quant'] * test[,'x14'] +
+     mod$summary.fixed['x15', '0.975quant'] * test[,'x15'] +
+     mod$summary.fixed['x9', '0.975quant'] * test[,'x9'] +
+     mod$summary.fixed['x24', '0.975quant'] * test[,'x24'] +
+     mod$summary.fixed['x32', '0.975quant'] * test[,'x32'] + 
+        
+       
+   rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "0.975quant"])) + #---source random effect
+   rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "0.975quant"])) + #---settlement type and region nested effects 
+   rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "0.975quant"])) + #---set-type random effect
+   rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "0.975quant"])) + #---region random effect
+        
+        mod$summary.random$IDsr['0.975quant'][test_ind,1] + #--uncorrelated spatial random effects
+
+      field_upper[test_ind,1]
+      
+      dens_htU <- exp(fixedU)
+      pop_htU <- dens_htU*test$bld
+    
+    # calculate fit metrics
+    met_in <- mod_metrics2(test$pop,  
+                           pop_ht)
+    
+    met_list_in[[i]]<- unlist(met_in)
+    pred_list_in[[i]] <- data.frame(obs = test$obs, pred = pop_ht,
+                                    lower = pop_htL,
+                                    upper = pop_htU,
+                                    fold = rep(i, length(test$obs)),
+                                    data = rep("insample", length(test$obs)))
+  }
+  met_list_in_dat <- do.call(rbind,met_list_in) # y , fitted y
+  metrics_in <- apply(met_list_in_dat, 2, mean) #
+  pred_list_in_dat <- do.call(rbind,pred_list_in) # y ,fitted y , lower, upper,fold
+  
+  #-----------------------------------------------------------
+  #               out - of -sample
+  #-----------------------------------------------------------
+  met_list_out <- list()
+  pred_list_out <- list()
+  for(i in 1:length(k_uniq))
+  {
+    
+    print(paste0("out-of-sample cross-validation using fold ", i, sep=""))
+    train_ind <- which(dat$k_fold!=k_uniq[i])
+    test_ind <- which(dat$k_fold==k_uniq[i])
+    dim(train <- dat[train_ind, ])#---train set for fold i
+    dim(test <- dat[test_ind, ]) #---test set for fold i
+    
+    
+    train_coords <- coords[train_ind,]
+    test_coords <- coords[test_ind,]
+    
+    
+    ###---Create projection matrices for training and testing datasets
+    Ae<-inla.spde.make.A(mesh=mesh,loc=as.matrix(train_coords));dim(Ae) #training
+    
+    
+    #####------------------------
+     covars_train <- train[,c("x13", "x14", "x15", "x9", "x24","x32",
+                              "set_reg" , "region","source","IDsr","set_typ")]; dim(covars_train)#
+    stk_train <- inla.stack(data=list(y=train$dens), #the response
+                            
+                            A=list(Ae,1),  #the A matrix; the 1 is included to make the list(covariates)
+                            
+                            effects=list(c(list(Intercept=1), #the Intercept
+                                           iset),  #the spatial index
+                                         #the covariates
+                                         list(covars_train)
+                            ), 
+                            tag='train')
+    
+    
+    ###---Rerun INLA for model test prediction
+    model <-inla(svr_form, #the svr_formula
+                 data=inla.stack.data(stk_train,spde=spde),  #the data stack
+                 family= 'gamma',   #which family the data comes from
+                 control.predictor=list(A=inla.stack.A(stk_train),compute=TRUE),  #compute gives you the marginals of the linear predictor
+                 control.compute = list(dic = TRUE, waic = TRUE, cpo=TRUE,config = TRUE), #model diagnostics and config = TRUE gives you the GMRF
+                 verbose = T) #can include verbose=TRUE to see the log of the model runs
+    summary(model)
+    
+    
+    ##--------mean --------------------------------------------------------
+    # spatial random effects based on the full data best model
+    sfield_nodes_mean <- model$summary.random$spatial.field['mean']
+    field_mean <- (A%*% as.data.frame(sfield_nodes_mean)[, 1])
+    
+   fixed <-  
+      model$summary.fixed['Intercept', 'mean'] +
+     model$summary.fixed['x13', 'mean'] * test[,'x13'] +
+     model$summary.fixed['x14', 'mean'] * test[,'x14'] +
+     model$summary.fixed['x15', 'mean'] * test[,'x15'] +
+     model$summary.fixed['x9', 'mean'] * test[,'x9'] +
+     model$summary.fixed['x24', 'mean'] * test[,'x24'] +
+     model$summary.fixed['x32', 'mean'] * test[,'x32'] + 
+      
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "mean"])) + #---source random effect
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "mean"])) + #---settlement type and region nested effects 
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "mean"])) + #---set-type random effect
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "mean"])) + #---region random effect
+      
+      mod$summary.random$IDsr['mean'][test_ind,1] + #--uncorrelated spatial random effects
+
+    field_mean[test_ind,1]
+    
+    dens_ht <- exp(fixed)
+    sum(pop_ht <- dens_ht*test$bld)
+    
+    
+    
+    #### LOWER---------------------------------
+    
+    # spatial random effects based on the full data best model
+    sfield_nodes_lower <- model$summary.random$spatial.field['0.025quant']
+    field_lower <- (A%*% as.data.frame(sfield_nodes_lower)[, 1])
+    
+   fixedL <-  
+      model$summary.fixed['Intercept', '0.025quant'] +
+     model$summary.fixed['x13', '0.025quant'] * test[,'x13'] +
+     model$summary.fixed['x14', '0.025quant'] * test[,'x14'] +
+     model$summary.fixed['x15', '0.025quant'] * test[,'x15'] +
+     model$summary.fixed['x9', '0.025quant'] * test[,'x9'] +
+     model$summary.fixed['x24', '0.025quant'] * test[,'x24'] +
+     model$summary.fixed['x32', '0.025quant'] * test[,'x32'] + 
+     
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "0.025quant"])) + #---source random effect
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "0.025quant"])) + #---settlement type and region nested effects 
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "0.025quant"])) + #---set-type random effect
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "0.025quant"])) + #---region random effect
+      
+      mod$summary.random$IDsr['0.025quant'][test_ind,1] + #--uncorrelated spatial random effects
+ 
+    field_lower[test_ind,1]
+    
+    dens_htL <- exp(fixedL)
+    pop_htL <- dens_htL*test$bld
+    
+    
+    
+    ### upper ---------------------------------------------
+    
+    # spatial random effects based on the full data best model
+    sfield_nodes_upper <- model$summary.random$spatial.field['0.975quant']
+    field_upper <- (A%*% as.data.frame(sfield_nodes_upper)[, 1])
+    
+    
+   fixedU <-  
+      model$summary.fixed['Intercept', '0.975quant'] +
+     model$summary.fixed['x13', '0.975quant'] * test[,'x13'] +
+     model$summary.fixed['x14', '0.975quant'] * test[,'x14'] +
+     model$summary.fixed['x15', '0.975quant'] * test[,'x15'] +
+     model$summary.fixed['x9', '0.975quant'] * test[,'x9'] +
+     model$summary.fixed['x24', '0.975quant'] * test[,'x24'] +
+     model$summary.fixed['x32', '0.975quant'] * test[,'x32'] + 
+     
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for source", "0.975quant"])) + #---source random effect
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_reg", "0.975quant"])) + #---settlement type and region nested effects 
+     rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for set_typ", "0.975quant"])) + #---set-type random effect
+      rnorm(nrow(test), 0, sqrt(1/mod$summary.hyperpar["Precision for region", "0.975quant"])) + #---region random effect
+     
+      mod$summary.random$IDsr['0.975quant'][test_ind,1] + #--uncorrelated spatial random effects
+
+    field_upper[test_ind,1]
+    
+    dens_htU <- exp(fixedU)
+    pop_htU <- dens_htU*test$bld
+   
+    
+    # calculate fit metrics
+    met_out <- mod_metrics2(test$pop,  
+                            pop_ht)
+    
+    met_list_out[[i]]<- unlist(met_out)
+    pred_list_out[[i]] <- data.frame(obs = test$obs, pred = pop_ht,
+                                     lower = pop_htL,
+                                     upper = pop_htU,
+                                     fold = rep(i, length(test$obs)),
+                                     data = rep("outsample", length(test$obs)))
+  }
+  met_list_out_dat <- do.call(rbind,met_list_out)
+  metrics_out <- apply(met_list_out_dat, 2, mean) # fit metrics
+  
+  pred_list_out_dat <- do.call(rbind,pred_list_out)# predictions
+  
+  cv_mets <- rbind(metrics_in, metrics_out)
+  output <- list( met_list_in_dat = met_list_in_dat,
+                  met_list_out_dat = met_list_out_dat,
+                  pred_dat = rbind(pred_list_in_dat, pred_list_out_dat),
+                  cv_metrics = rbind(metrics_in, metrics_out))
+}
+
+dat <- dat
+dat$obs <- dat$Imputed_LHHSIZE # observed household size
+
+(svr_cross_f_val <- svr_cross_f_validate(dat, n.folds = 5, 
+                             mod = svr_f_mod, 
+                             svr_form = svr_f_form,
+                             A, 
+                             seed = 35642114))
+svr_cross_f_val$cv_metrics    # combined averaged metrics
+svr_cross_f_val$pred_dat  # combined prediction data
+dim(svr_cross_f_val$pred_dat)
+(svr_com_f1_metrics <- rbind(svr_cross_f_val$met_list_in_dat,svr_cross_f_val$met_list_out_dat))
+write.csv(svr_com_f1_metrics, file=paste0(svr_results_path_f, "/svr_folds.csv"))
+```
+
+```{r visualize}
+#-- Scatterplots of spatial model cross-validation results----
+svr_pred.data <- svr_cross_f_val$pred_dat
+svr_pred.data$fold <- factor(svr_pred.data$fold)
+svr_pred.data$data <- factor(svr_pred.data$data,
+                         levels = c("insample", "outsample"),
+                         labels = c("In-Sample", "Out-of-Sample"))
+write.csv(svr_pred.data , file=paste0(svr_results_path_f, "/pre.data.csv"))
+
+
+#ggsave(filename=paste0(svr_results_path_f, "/spatial.cv.png"), plot = spatial.cv, width = 6, height = 6, dpi = 300)
+```
+
+```{r prediction}
+#-- for spatial model----
+sim_spatial_svr_f <- function(model, dat, Aprediction, run, inla.seed)
+{
+  fixedeff <- dens_hat <- pop_hat <- matrix(0, nrow=nrow(dat), ncol = run)
+
+  m1.samp <- inla.posterior.sample(run, model, 
+                                   seed = inla.seed, 
+                                   selection=list(x13 = 1, 
+                                                  x14 = 1, 
+                                                  x15 = 1, 
+                                                  x9 = 1,
+                                                  x24 = 1,
+                                                  x32 = 1
+                                                 # x40= 1, 
+                                                 # x12 = 1
+                                                 ),
+                                   num.threads="1:1")
+  
+  sfield_nodes_mean <- model$summary.random$spatial.field['mean']
+  field_mean <- (Apred%*% as.data.frame(sfield_nodes_mean)[, 1])
+  for(i in 1:run)
+  {
+    fixedeff[,i] <- 
+      model$summary.fixed['Intercept', 'mean'] +
+      m1.samp[[i]]$latent[1,] * dat[,'x13']  +
+      m1.samp[[i]]$latent[2,] * dat[,'x14'] +
+      m1.samp[[i]]$latent[3,] * dat[,'x15'] +
+      m1.samp[[i]]$latent[4,] * dat[,'x9'] + 
+      m1.samp[[i]]$latent[5,] * dat[,'x24'] +
+     m1.samp[[i]]$latent[6,] * dat[,'x32'] +
+      
+     rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for IDsr"])) +
+     rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for source"])) +
+     rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for set_reg"])) + #---settlement type and region nested effects 
+     rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for set_typ"])) + #---set-type random effect
+     rnorm(nrow(dat), 0, sqrt(1/m1.samp[[i]]$hyperpar["Precision for region"])) + #---region random effect 
+     
+      field_mean[,1]
+    
+    
+    dens_hat[,i] <- exp(fixedeff[,i])
+    pop_hat[,i] <- dens_hat[,i]*dat$bld
+    
+  }
+  dat$mean_dens_hat <- apply(dens_hat, 1, mean, na.rm=T) 
+  dat$mean_pop_hat  <- apply(pop_hat, 1, mean, na.rm=T) #
+  dat$lower_pop_hat <- apply(pop_hat, 1, quantile, probs=c(0.025), na.rm=T) #
+  dat$upper_pop_hat <- apply(pop_hat, 1, quantile, probs=c(0.975), na.rm=T) #
+  dat$sd_pop_hat <- apply(pop_hat, 1, sd, na.rm=T) #
+  dat$cv <- dat$sd_pop_hat/dat$mean_pop_hat#
+  
+  output <- list(pop_hat = pop_hat,
+                 est_data = dat)
+  
+}
+
+run=100
+inla.seed = 35642114
+data$bld <- data$CMR_buildings_count
+
+system.time(str(sim.spat_svr_f <- sim_spatial_svr_f(svr_f_mod,data,Apred, run, inla.seed))) 
+sum(sim.spat_svr_f$est_dat$mean_pop_hat,na.rm=T)#sim.spat is a list
+
+#  Join the posterior sample to the prediction data
+data.sim_svr_f <- data.frame(cbind(data[,c("CMR_Regions", "CMR_Department","CMR_Settlement_Classification")], sim.spat_svr_f$pop_hat))
+write.csv(data.sim_svr_f, file=paste0(svr_results_path_f, "/estimates/data.sim.csv"))
+```
+
+```{r Region estimates}
+(regional.est_svr_f <- regional_est(data.sim_svr_f, 100))
+sum(regional.est_svr_f$total)
+regional.est_svr_f$method <- rep("Proposed", nrow(regional.est_svr_f))
+
+write.csv(regional.est_svr_f, file=paste0(svr_results_path_f, "/estimates/regional_final.csv"))
+```
+
+# no Littoral
+```{r region  Errorplots}
+#---------------------------------------original
+#regional.est_svr_f<-read.csv(file.path(svr_results_path_f,"/estimates/regional_final.csv"))
+regional.est_svr_f$total2 <- round(regional.est_svr_f$total/1000)
+regional.est_svr_f$lower2 <- round(regional.est_svr_f$lower/1000)
+regional.est_svr_f$upper2 <- round(regional.est_svr_f$upper/1000)
+
+pd <- ggplot(regional.est_svr_f, aes(x=reorder(names, -total), 
+                      y=total2)) +
+  geom_errorbar(aes(ymin = lower2, ymax = upper2),
+                position = position_dodge(width = 0.4), width = 0.4,
+                size=0.9)+
+  geom_point(size = 2, color = "red", alpha=0.9) +
+  theme_bw()#+
+  #coord_flip() 
+  
+  
+pdh <- ggpar(pd, ylab="Estimated population count ('000)", xlab="Region",
+              legend = "none", legend.title = "Region:",
+              font.legend=c(14),
+              # font.label = list(size = 12, face = "bold", color ="red"),
+              #palette = "pnj",
+              font.x = c(14),
+              font.y = c(14),
+              font.main=c(14),
+              font.xtickslab =c(12),
+               font.ytickslab =c(14),
+              xtickslab.rt = 45)
+
+pdh
+ggsave(filename=paste0(svr_results_path_f, "/estimates/reginal.est.original.png"), plot = pdh, width = 6, height = 6, dpi = 300)
+
+#----------------------------- no Littoral
+library(dplyr)
+regional.est_svr_f1 <- regional.est_svr_f
+regional.est_svr_f1 <- regional.est_svr_f1[regional.est_svr_f1$names != "Littoral", ]
+
+regional.est_svr_f1$total2 <- round(regional.est_svr_f1$total/1000)
+regional.est_svr_f1$lower2 <- round(regional.est_svr_f1$lower/1000)
+regional.est_svr_f1$upper2 <- round(regional.est_svr_f1$upper/1000)
+
+pd.1 <- ggplot(regional.est_svr_f1, aes(x=reorder(names, -total), 
+                      y=total2)) +
+  geom_errorbar(aes(ymin = lower2, ymax = upper2),
+                position = position_dodge(width = 0.4), width = 0.4,
+                size=0.9)+
+  geom_point(size = 2, color = "red", alpha=0.9) +
+  theme_bw()#+
+  #coord_flip() 
+  
+  
+pdh.1 <- ggpar(pd.1, ylab="Estimated population count ('000)", xlab="Region (without Littoral)",
+              legend = "none", legend.title = "Region:",
+              font.legend=c(14),
+              # font.label = list(size = 12, face = "bold", color ="red"),
+              #palette = "pnj",
+              font.x = c(14),
+              font.y = c(14),
+              font.main=c(14),
+              font.xtickslab =c(12),
+               font.ytickslab =c(14),
+              xtickslab.rt = 45)
+
+pdh.1
+ggsave(filename=paste0(svr_results_path_f, "/estimates/reginal.est.1.png"), plot = pdh.1, width = 6, height = 6, dpi = 300)
+
+#------------------------------------no y
+pd.2 <- ggplot(regional.est_svr_f1, aes(x=reorder(names, -total), 
+                      y=total2)) +
+  geom_errorbar(aes(ymin = lower2, ymax = upper2),
+                position = position_dodge(width = 0.4), width = 0.4,
+                size=0.9)+
+  geom_point(size = 2, color = "red", alpha=0.9) +
+    scale_y_continuous(labels=NULL)+
+  theme_bw()#+
+  #coord_flip() 
+  
+  
+pdh.2 <- ggpar(pd.2, ylab="Estimated population count ('000)", xlab="Region (without Littoral)",
+              legend = "none", legend.title = "Region:",
+              font.legend=c(14),
+              # font.label = list(size = 12, face = "bold", color ="red"),
+              #palette = "pnj",
+              font.x = c(14),
+              font.y = c(14),
+              font.main=c(14),
+              font.xtickslab =c(12),
+               font.ytickslab =c(14),
+              xtickslab.rt = 45)
+pdh.2
+
+ggsave(filename=paste0(svr_results_path_f, "/estimates/reginal.est.noy6.png"), plot = pdh.2, width = 6, height = 6, dpi = 300)
+
+```
+
+```{r region  modelled-projected}
+#| label: Compare the projected regional estimates with the modelled
+library(ggplot2)
+library(scales)
+theme_set(theme_classic())
+df_svr_f<-df
+#-- prep data----
+names(df_svr_f)
+df_svr_f$NIS.Projected<- df_svr_f$NIS.Projected/1000
+#df_svr_f$total <- df_svr_f$total/1000
+df_svr_f$total <- regional.est_svr_f$total/1000
+
+# Projected 
+df_svr_f1 <- df_svr_f[,c("names", "NIS.Projected")]
+df_svr_f1$Method <- rep("Projected", nrow(df_svr_f1))
+colnames(df_svr_f1) <- c("Region", "Estimate", "Method")
+# Modelled 
+df_svr_f2 <- df_svr_f[,c("names", "total")]
+df_svr_f2$Method <- rep("Modelled", nrow(df_svr_f2))
+colnames(df_svr_f2) <- c("Region", "Estimate", "Method")
+
+# combined
+df_svr_f3 <- rbind(df_svr_f1, df_svr_f2)
+df_svr_f3$Method <- factor(df_svr_f3$Method, levels = c("Projected", "Modelled"))
+
+write.csv(df_svr_f3, file=paste0(svr_results_path_f, "/estimates/modelled_projected.csv"))
+
+```
+
+
+

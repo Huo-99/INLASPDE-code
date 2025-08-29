@@ -1,0 +1,95 @@
+---
+title: "feature selection"
+author: '35642114'
+date: "2025-08-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Stepwise-Feature selection
+
+```{r both/backward selection}
+library(car) #for the vif
+#--both/backward----
+fdens_full <- glm(resp ~., data=mcovs, family = gaussian) ; summary(fdens_full)
+
+step_back <- stepAIC(fdens_full, scale = 0,
+                     direction = c("backward"),
+                     trace = 1, keep = NULL, steps = 1000, use.start = FALSE,
+                     k = 2)
+summary(step_back)#ͬboth
+
+###-----------REFIT THE SELECTED MODEL AND CHOOSE only significant variables with VIF < 5
+fdens1 <-  glm(formula = resp ~ x1 + x2 + x3 + x4 + x7 + x9 + x10 + x12 + 
+                 x13 + x14 + x15 + x16 + x17 + x20 + x21 + x22 + x32 + x33 + 
+                 x34 + x39 + x40 + x42 + x43, family = gaussian, data = mcovs)
+vif1 = vif(fdens1)
+vif1[(vif1 < 5)]
+
+# Refit with the selected covariates
+fdens_back <-  glm(formula = resp ~ x2 + x3 + x17 + x21 + x32 +x34 + 
+                 +x40 + x42, family = gaussian, data = mcovs) ; summary(fdens_back)
+
+covS_backward <- c("x2","x3","x17","x21","x32","x34","x40","x42")
+# Visualise the matrix of correlation coefficients of the selected covs
+require(corrplot) # for correlation plot
+
+png(paste0(results_path_b, "/cor_plots.png"))
+corrplot(
+  cor(mcovs[,covS_backward]),
+  method = 'color',
+  type = 'lower',
+  tl.col = 'black',
+  tl.cex = 1,
+  addCoef.col = "black",
+  number.cex=0.6,
+  col = colorRampPalette(c( 'yellow',"red"))(200)
+)
+#dev.off()
+
+```
+
+```{r forward selection}
+#--forward----
+fdensnull <- glm(resp ~1, data=mcovs, family = gaussian) ; summary(fdensnull)
+step_forward <- stepAIC(fdensnull, scope = formula(fdens_full),
+                     direction = c("forward"),
+                     trace = 1, keep = NULL, steps = 1000, use.start = FALSE,
+                     k = 2)
+summary(step_forward)
+
+fdens2 <-  glm(formula = resp ~ x14 + x4 + x22 + x40 + x42 + x34 + x29 + 
+    x17 + x2 + x6 + x5 + x32 + x33 + x11 + x15 + x16 + x1 + x3 + 
+    x20 + x43 + x39 + x21, family = gaussian, data = mcovs)
+
+vif2 = vif(fdens2 )
+vif2[(vif2 < 5)]
+
+fdens_forward <-  glm(formula = resp ~  x17 + x32 + x34 + x6 + x21 + x42, family = gaussian, data = mcovs)
+summary(fdens_forward)
+
+covS_forward <- c("x6","x17","x21","x32","x34","x42")
+
+# Visualise the matrix of correlation coefficients of the selected covs
+require(corrplot) # for correlation plot
+
+png(paste0(results_path_f, "/cor_plots.png"))
+corrplot(
+  cor(mcovs[,covS_forward]),
+  method = 'color',
+  type = 'lower',
+  tl.col = 'black',
+  tl.cex = 1,
+  addCoef.col = "black",
+  number.cex=0.6,
+  col = colorRampPalette(c( 'yellow',"red"))(200)
+)
+#dev.off()
+
+```
+
+
+
