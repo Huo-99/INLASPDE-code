@@ -1,6 +1,6 @@
 The .Rmd codes are to the Master's dissertation\
 > [!NOTE]
-> Using at least version R 4.4.1\
+> Using at least version R 4.4.1
 
 > [!IMPORTANT]
 > The order to run the codes:Bayesianmodels.Rmd, model_assessment_and_posterior_simulation.Rmd, the_rest_plots.Rmd
