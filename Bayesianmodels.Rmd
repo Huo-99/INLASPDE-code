@@ -68,36 +68,37 @@ plot(shp["I_LHHSI"])
 #library(RColorBrewer)
 library(sf)#read and handle file
 library(cols4all)#new color bag   
+# check and repair the invalid geometric position
 which(st_is_valid(shp)==F) ; shp <- st_make_valid(shp); which(is.na(shp))
 
 str(shp$O_LHHSI); shp$O_LHHSI <- as.numeric(shp$O_LHHSI);str(shp )
 is.factor(shp$Dat_Typ); shp$Dat_Typ <- factor(shp$Dat_Typ)
-    
+
+#--------------Plots of maps  
 #tmap_mode("plot")  #static plot
 tmap_mode("view")  #dynamic plot
-
-tm_shape(shp) +
- tm_fill(
-  col = "O_LHHSI",
-  fill.scale = tm_scale(values = "brewer.ylgnbu"),
-  fill.legend = tm_legend(title = "Price in US$ per lb")
- ) +
- tm_borders() +
- tm_facets(by = "Dat_Typ", ncol = 2)
-dir.create(results_path_b, showWarnings = FALSE, recursive = TRUE)
-#----------------------no legend
 png(file.path(results_path_b, "I_LHHSI_map.png"), width = 2000, height = 2400, res = 500)
 plot(shp["I_LHHSI"], key.pos = NULL);dev.off()
-tmap_mode("plot")  #static plot
-m=tm_shape(shp) +
-  tm_fill(col = "O_LHHSI",
-          fill.scale = tm_scale(values = "brewer.ylgnbu")) +
-  tm_borders() +
-  tm_facets(by = "Dat_Typ", ncol = 2) +
-  tm_layout(legend.show = FALSE)   
 
-png(filename=paste0(results_path_b, "/shp_I_LHHSI.png") , width = 2000, height = 2800, res = 500)
-print(m); dev.off()
+mycols <- c("#FFD700","#33a02c","#E41A1C","#1f78b4","#e7298a")
+
+#_merged
+m<-ggplot(shp) +
+  geom_sf(aes(fill = Dat_Typ), color = "grey20", size = 0.4) +
+  scale_fill_manual(values = mycols, name = "Dat_Typ") +
+ scale_color_manual(values = mycols, guide = "none") + 
+  theme_minimal() +
+  labs(x="Longitude", y="Latitude",size=20) +#title = "Cameroon Regions"
+  theme(
+    legend.position = "right",
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text  = element_text(size = 11),
+    plot.title   = element_text(size = 14, face = "bold")
+  );m
+
+ggsave(filename = paste0(results_path_b, "/shp_I_LHHSI.png"), 
+       plot = m, width = 6, height = 6, dpi = 300, bg="white")
+dev.off()
 ```
 
 ```{r function definition}
@@ -1109,6 +1110,7 @@ print(tbl6<-tbl6[order(tbl6$CPO), ], digits = 2)
 write.csv(tbl6, file=paste0(svr_results_path_f, "/svr_cpo_f2.csv"))
 
 ```
+
 
 
 
