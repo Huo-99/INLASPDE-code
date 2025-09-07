@@ -9,12 +9,12 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r path}
-results_path_b<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-stepwise0/backward"
-results_path_f<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-stepwise0/forward"
-bart_results_path_b<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-bart0/backward"
-bart_results_path_f<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-bart0/forward"
-svr_results_path_b<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-svr0/backward"
-svr_results_path_f<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-svr0/forward"
+results_path_b<-"C:/Users/xh2u24/Desktop/p4-INLASPDE/results-R-stepwise/backward"
+results_path_f<-"C:/Users/xh2u24/Desktop/p4-INLASPDE/results-R-stepwise/forward"
+bart_results_path_b<-"C:/Users/xh2u24/Desktop/p4-INLASPDE/results-R-bart/backward"
+bart_results_path_f<-"C:/Users/xh2u24/Desktop/p4-INLASPDE/results-R-bart/forward"
+svr_results_path_b<-"C:/Users/xh2u24/Desktop/p4-INLASPDE/results-R-svr/backward"
+svr_results_path_f<-"C:/Users/xh2u24/Desktop/p4-INLASPDE/results-R-svr/forward"
 ```
 
 ```{r read data}
@@ -265,7 +265,7 @@ ggplot(subset(shp_merged, region == 7)) +
   ) +
   labs(title = "Region 7 Highlighted")
 
-##############_---------------------------------------region 7, 8, 9
+##############--------------------------------------region 7, 8, 9
 
 q1<-ggplot(subset(shp_merged, region %in% c(7, 8, 9))) +
   geom_sf(aes(fill = factor(region)), color = "black", size = 0.4) +
@@ -282,7 +282,7 @@ q1<-ggplot(subset(shp_merged, region %in% c(7, 8, 9))) +
     plot.title   = element_text(size = 14, face = "bold")
   ) #+
  # labs(title = "Regions 7, 8, and 9")
-#ggsave(filename=paste0("C:/Users/霍湘月/Desktop/", "789.png"), plot = q1, width = 8, height = 5, dpi = 300, bg="white")
+#ggsave(filename=paste0("C:/Users/xh2u24/Desktop/", "789.png"), plot = q1, width = 8, height = 5, dpi = 300, bg="white")
   q1
   
 ########----------------------------------------------------------------- complete regions
@@ -304,39 +304,12 @@ q2<-ggplot(shp_merged) +
     plot.title   = element_text(size = 14, face = "bold")
   );q2
 
-#ggsave(filename=paste0("C:/Users/霍湘月/Desktop/", "regions.png"), plot = q2, width = 10, height = 6, dpi = 300, bg="white")
+#ggsave(filename=paste0("C:/Users/xh2u24/Desktop/", "regions.png"), plot = q2, width = 10, height = 6, dpi = 300, bg="white")
 #ggsave("d1.pc.png", d_plot_final, width = 8, height = 5, dpi = 300)
 ```
 
 
 ###---------- uncertainty difference plots 
-```{r no use}
-
-library(ggplot2)
-
-w<-ggplot(shp_merged) +
-  geom_sf(aes(fill = uncertainty), color = "black", size = 0.2) +
-  scale_fill_distiller(
-    palette = "RdBu",        # 红-蓝发散色系
-    name = "Difference",
-    limits = c(-1, 1),       # 固定范围到 [-1, 1]
-    #oob = scales::squish     # 超出范围的值压缩到边界色
-  ) +
-  theme_minimal() +
-  labs(
-    title = "Difference in Regional Estimates",
-    subtitle = "BART - Backward",
-    x = "Longitude", y = "Latitude"
-  ) +
-  theme(
-    legend.position = "right",
-    plot.title = element_text(size = 14, face = "bold"),
-    plot.subtitle = element_text(size = 12)
-  ) ;w
-ggsave(filename=paste0("C:/Users/霍湘月/Desktop/defaultprior/", "regions.6.png"), plot = w, width = 10, height = 6, dpi = 300, bg="white")
-
-
-```
 
 ```{r}
 library(dplyr)
@@ -360,49 +333,10 @@ pp<-ggplot(heat_df, aes(x = Region, y = Method, fill = Delta)) +
   theme_minimal(base_size = 18) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1));pp
 
+ggsave(filename=paste0("C:/Users/xh2u24/Desktop/defaultprior/", "regions.8.png"), plot = t, width = 10, height = 6, dpi = 300, bg="white")
 ```
 
-```{r no use}
 
-tab_long <- tab %>%
-  mutate(
-    Region = factor(Region, levels = Region),
-    bart   = `def.b.8`,   # BART - Backward
-    svr    = `def.s.8`    # SVR  - Backward
-  ) %>%
-  pivot_longer(c(bart, svr), names_to = "Method", values_to = "Delta") %>%
-  mutate(
-    Method = factor(Method,
-                    levels = c("bart", "svr"),
-                    labels = c("BART - Backward", "SVR  - Backward"))
-  )
-
-# 原始范围（非对称）
-rng1 <- min(tab_long$Delta, na.rm = TRUE)
-rng2 <- max(tab_long$Delta, na.rm = TRUE)
-
-t <- ggplot(tab_long, aes(x = Region, y = Delta, fill = Method)) +
-  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
-  geom_col(position = position_dodge(width = 0.7), width = 0.6) +
-  coord_flip() +
-  scale_fill_manual(values = c("BART - Backward" = "#377EB8",
-                               "SVR  - Backward" = "#E41A1C"),
-                    name = NULL) +
-  scale_y_continuous(limits = c(rng1, rng2),
-                     expand = expansion(mult = c(0.02, 0.02))) +  # 防止顶端被裁
-  labs(x = NULL,
-       y = "Difference in Uncertainty (vs Backward)") +
-  theme_bw() +
-  theme(axis.title.y = element_blank(),
-        legend.position = "top")
-
-t
-
-
-#ggsave(filename=paste0("C:/Users/霍湘月/Desktop/defaultprior/", "regions.8.png"), plot = t, width = 10, height = 6, dpi = 300, bg="white")
-
-
-```
 
 
 
