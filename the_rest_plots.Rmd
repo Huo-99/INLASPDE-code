@@ -1,0 +1,409 @@
+---
+title: "plots"
+output: html_document
+date: "2025-07-28"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r path}
+results_path_b<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-stepwise0/backward"
+results_path_f<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-stepwise0/forward"
+bart_results_path_b<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-bart0/backward"
+bart_results_path_f<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-bart0/forward"
+svr_results_path_b<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-svr0/backward"
+svr_results_path_f<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/results-R-svr0/forward"
+```
+
+```{r read data}
+d1<-read.csv(file.path(results_path_b,"pre.data.csv"))
+d2<-read.csv(file.path(results_path_f,"pre.data.csv"))
+d3<-read.csv(file.path(bart_results_path_b, "pre.data.csv"))
+d4<-read.csv(file.path(bart_results_path_f, "pre.data.csv"))
+d5<-read.csv(file.path(svr_results_path_b, "pre.data.csv"))
+d6<-read.csv(file.path(svr_results_path_f, "pre.data.csv"))
+```
+
+######--------------------------------------------------------------plots
+
+```{r boxplots}
+d1$method <- "Backward"  
+d3$method <- "BART"   
+d5$method <- "SVR"   
+
+d_all1 <- bind_rows(d1, d3, d5)
+
+metric_by_fold <- d_all1 %>%
+  group_by(method, data, fold) %>%
+  summarise(
+    MAE  = mean(abs(pred - obs), na.rm = TRUE),
+    RMSE = sqrt(mean((pred - obs)^2, na.rm = TRUE)),
+    BIAS  = abs(mean((pred - obs), na.rm = TRUE)),
+    CORR = suppressWarnings(cor(obs, pred, use = "complete.obs")),
+    .groups = "drop"
+  )
+
+metric_long <- metric_by_fold %>%
+  pivot_longer(c(MAE, RMSE, BIAS, CORR), names_to = "metric", values_to = "value") %>%
+  mutate(
+    data   = factor(data, levels = c("In-Sample","Out-of-Sample")),
+    metric = factor(metric, levels = c("MAE","RMSE","BIAS","CORR"),
+                    labels = c("MAE","RMSE","BIAS","CORR")),
+    method = factor(method, levels = c("Backward","BART","SVR"))
+  )
+
+cols <- c("Backward"="#FFD700", "BART"="#d9534f", "SVR"="#8a6bb8")
+
+p <- ggplot(metric_long, aes(x = data, y = value, fill = method)) +
+  geom_boxplot(width = 0.65, outlier.size = 1.1,
+               position = position_dodge(width = 0.8), alpha = 0.95) +
+  facet_wrap(~ metric, nrow = 1, scales = "free_y") +
+  scale_fill_manual(values = cols, name = "Method") +
+  labs(x = NULL, y = NULL) +
+  theme_bw(base_size = 22) +
+  theme(
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(face = "bold", size = 13),
+    legend.position = "top",
+    legend.title = element_text(face = "bold"),
+    axis.title.x = element_text(face = "bold", margin = margin(t = 6))
+  )
+
+print(p)
+
+###################################
+d2$method <- "Forward"  
+d4$method <- "BART"   
+d6$method <- "SVR"  
+d_all2 <- bind_rows(d2, d4, d6)
+
+metric_by_fold <- d_all2 %>%
+  group_by(method, data, fold) %>%
+  summarise(
+    MAE  = mean(abs(pred - obs), na.rm = TRUE),
+    RMSE = sqrt(mean((pred - obs)^2, na.rm = TRUE)),
+    BIAS  = abs(mean((pred - obs), na.rm = TRUE)),
+    CORR = suppressWarnings(cor(obs, pred, use = "complete.obs")),
+    .groups = "drop"
+  )
+
+metric_long <- metric_by_fold %>%
+  pivot_longer(c(MAE, RMSE, BIAS, CORR), names_to = "metric", values_to = "value") %>%
+  mutate(
+    data   = factor(data, levels = c("In-Sample","Out-of-Sample")),
+    metric = factor(metric, levels = c("MAE","RMSE","BIAS","CORR"),
+                    labels = c("MAE"," RMSE", "BIAS","CORR")),
+    method = factor(method, levels = c("Forward","BART","SVR"))
+  )
+
+cols <- c("Forward"="#FFD700", "BART"="#d9534f", "SVR"="#8a6bb8")
+
+p1 <- ggplot(metric_long, aes(x = data, y = value, fill = method)) +
+  geom_boxplot(width = 0.65, outlier.size = 1.1,
+               position = position_dodge(width = 0.8), alpha = 0.95) +
+  facet_wrap(~ metric, nrow = 1, scales = "free_y") +
+  scale_fill_manual(values = cols, name = "Method") +
+  labs(x = "Cross Validation", y = NULL) +
+  theme_bw(base_size = 22) +
+  theme(
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(face = "bold", size = 13),
+    legend.position = "top",
+    legend.title = element_text(face = "bold"),
+    axis.title.x = element_text(face = "bold", margin = margin(t = 6))
+  )
+
+print(p1)
+
+library(patchwork)
+
+combined <- p / p1 
+
+print(combined)
+
+ggsave("two_rows.pc.png", combined, width = 16, height = 10, dpi = 300)
+
+
+# adding mean
+# p + stat_summary(fun = mean, geom = "point",
+#                  position = position_dodge(width = 0.65),
+#                  shape = 23, size = 2.8, fill = "white")   
+```
+
+```{r scatter plots}
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+
+d<-d5
+ss.in <- function(x) ((x) / sum(d$pred[d$data=="In-Sample"],na.rm = T))
+ss.out <- function(x) ((x) / sum(d$pred[d$data=="Out-of-Sample"],na.rm = T))
+
+d$data <- factor(d$data)
+lower.in<-d$pred[d$data=="In-Sample"]-(d$pred[d$data=="In-Sample"]-d$lower[d$data=="In-Sample"])/2
+lower.out<-d$pred[d$data=="Out-of-Sample"]-(d$pred[d$data=="Out-of-Sample"]-d$lower[d$data=="Out-of-Sample"])/2
+upper.in<-d$pred[d$data=="In-Sample"]+(d$upper[d$data=="In-Sample"]-d$pred[d$data=="In-Sample"])/2
+upper.out<-d$pred[d$data=="Out-of-Sample"]+(d$upper[d$data=="Out-of-Sample"]-d$pred[d$data=="Out-of-Sample"])/2
+
+d$lower[d$data=="In-Sample"] <- ss.in(lower.in)
+d$lower[d$data=="Out-of-Sample"] <-ss.out(lower.out)
+d$upper[d$data=="In-Sample"] <- ss.in(upper.in)
+d$upper[d$data=="Out-of-Sample"] <- ss.out(upper.out)
+d$pred[d$data=="In-Sample"] <- ss.in(d$pred[d$data=="In-Sample"])
+d$pred[d$data=="Out-of-Sample"] <- ss.out(d$pred[d$data=="Out-of-Sample"])
+
+d$obs[d$data=="In-Sample"] <- d$obs[d$data=="In-Sample"]/sum(d$obs[d$data=="In-Sample"],na.rm = T)
+d$obs[d$data=="Out-of-Sample"] <- d$obs[d$data=="Out-of-Sample"]/ sum(d$obs[d$data=="Out-of-Sample"],na.rm = T)
+
+
+d_pre.data <- d %>%
+  #filter(obs < 0.002, pred < 0.002) %>%
+ # filter(lower < 0.03, lower < 0.03) %>%
+# filter(upper < 0.03, upper < 0.03) %>%
+  filter(obs != 0, pred != 0) %>% # , lower != 0, upper != 0
+  na.omit()
+
+#---------------------------------------------------------------------------------------------
+
+d_plot <- ggplot(d_pre.data, aes(x = obs, y = pred, colour = data)) +
+ geom_linerange(aes(ymin = lower, ymax = upper), alpha = 0.35) +
+  geom_point(colour="#1f77b4",size=1) +##FFC107,#FFEB3B ,#FFD700 #4a6bb2#3b5b92#5c7cc6 #0072B2#2c7fb8   blue: #1f77b4 red:#E41A1C
+  geom_smooth(method = "lm",colour="black",linewidth=0.85) +
+  facet_grid(. ~ data) +
+ theme_bw() +
+   scale_color_manual(values = c("In-Sample" = "#E41A1C",   
+                                "Out-of-Sample" = "#E41A1C"
+                                ),
+                     name = NULL) +
+  theme(strip.text = element_text(size = 20)) +
+   theme(
+    legend.position = "none")+ theme(axis.text.x = element_text(angle = 45, hjust = 1))+ 
+ scale_x_continuous(limits = c(0, 0.002))+
+  scale_y_continuous(limits = c(0, 0.004))
+  facet_wrap(~data)
+
+d_plot_final <- ggpar(d_plot,
+  xlab = "Observed population",
+  ylab = "Predicted population",
+  legend = "none",
+  legend.title = "Sample Type",
+  #size = 19,
+  font.legend = c(16),
+  #font.label = list(size = 20, face = "bold", color = "red"),
+  font.x = c(20),
+  font.y = c(20),
+  font.main = c(16),
+  font.xtickslab = c(15),
+  font.ytickslab = c(15),
+)
+
+d_plot_final
+
+
+#ggsave(filename=paste0("C:/Users/霍湘月/Desktop/defaultprior/scatter", "/5.png"), plot = d_plot_final, width = 8, height = 5, dpi = 300)
+#ggsave("d1.pc.png", d_plot_final, width = 8, height = 5, dpi = 300)
+
+```
+
+###--------------the map of 10 regions
+```{r read data}
+#install.packages("readxl")
+library(readxl)
+f11 <- read_excel("C:\\Users\\xh2u24\\Desktop\\defaultprior\\reg.uncer.8.xlsx") 
+f12 <- read_excel("C:\\Users\\xh2u24\\Desktop\\defaultprior\\reg.uncer.6.xlsx")  
+
+f21 <- read_excel("C:\\Users\\xh2u24\\Desktop\\weaklypc\\reg.uncer.8.xlsx") 
+f22 <- read_excel("C:\\Users\\xh2u24\\Desktop\\weaklypc\\reg.uncer.6.xlsx") 
+
+f31 <- read_excel("C:\\Users\\xh2u24\\Desktop\\strongpc\\reg.uncer.8.xlsx")  
+f32 <- read_excel("C:\\Users\\xh2u24\\Desktop\\strongpc\\reg.uncer.6.xlsx") 
+
+f41 <- read_excel("C:\\Users\\xh2u24\\Desktop\\strongnonpc\\reg.uncer.8.xlsx")  
+f42 <- read_excel("C:\\Users\\xh2u24\\Desktop\\strongnonpc\\reg.uncer.6.xlsx") 
+```
+
+```{r }
+library(sf)
+library(dplyr)
+library(ggplot2)
+
+f<-f11
+f$uncertainty<-f$uncertainty2  
+
+
+region_uncertainty <- tibble(
+  region_id   = f$id,          # 1..10
+  region_name = f$names,       # "Centre", ...
+  uncertainty = f$uncertainty
+)
+
+dat_merged<-dat%>%
+ mutate(region_id=as.character(region))%>%
+ left_join(region_uncertainty%>%
+            mutate(region_id=as.character(region_id)), by="region_id")
+
+shp_merged <- cbind(shp, dat_merged[,c("region","uncertainty")])
+
+shp_merged$region <- factor(shp_merged$region, levels = 1:10)
+
+```
+
+```{r distribution of regions}
+library(RColorBrewer)
+##################   single region
+ggplot(subset(shp_merged, region == 7)) +
+  geom_sf(aes(fill = factor(region)), color = "black", size = 0.4) +
+  scale_fill_manual(values = c("7" = "#a6761d"), name = "Region") +  # 给 region 7 一个鲜明的黄色
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text  = element_text(size = 11),
+    plot.title   = element_text(size = 14, face = "bold")
+  ) +
+  labs(title = "Region 7 Highlighted")
+
+##############_---------------------------------------region 7, 8, 9
+
+q1<-ggplot(subset(shp_merged, region %in% c(7, 8, 9))) +
+  geom_sf(aes(fill = factor(region)), color = "black", size = 0.4) +
+  scale_fill_manual(values = c("7" = "#e7298a", 
+                               "8" = "green", 
+                               "9" = "yellow"), 
+                    name = "Region") +  
+  theme_minimal() +
+ labs(x="Longitude", y="Latitude") +#title = " Regions"
+  theme(
+    legend.position = "right",
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text  = element_text(size = 11),
+    plot.title   = element_text(size = 14, face = "bold")
+  ) #+
+ # labs(title = "Regions 7, 8, and 9")
+#ggsave(filename=paste0("C:/Users/霍湘月/Desktop/", "789.png"), plot = q1, width = 8, height = 5, dpi = 300, bg="white")
+  q1
+  
+########----------------------------------------------------------------- complete regions
+mycols <- c("blue","#FFD700","#7570b3","#33a02c","#E41A1C",
+            "#e6ab02","#e7298a","green","yellow","#1f78b4")
+
+shp_merged$region <- factor(shp_merged$region, levels = 1:10)
+
+q2<-ggplot(shp_merged) +
+  geom_sf(aes(fill = region), color = "grey20", size = 0.4) +
+  scale_fill_manual(values = mycols, name = "Region") +
+ scale_color_manual(values = mycols, guide = "none") +   # 边界线颜色跟 fill 一致，但图例不再重复
+  theme_minimal() +
+  labs(x="Longitude", y="Latitude",size=20) +#title = "Cameroon Regions"
+  theme(
+    legend.position = "right",
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text  = element_text(size = 11),
+    plot.title   = element_text(size = 14, face = "bold")
+  );q2
+
+#ggsave(filename=paste0("C:/Users/霍湘月/Desktop/", "regions.png"), plot = q2, width = 10, height = 6, dpi = 300, bg="white")
+#ggsave("d1.pc.png", d_plot_final, width = 8, height = 5, dpi = 300)
+```
+
+
+###---------- uncertainty difference plots 
+```{r no use}
+
+library(ggplot2)
+
+w<-ggplot(shp_merged) +
+  geom_sf(aes(fill = uncertainty), color = "black", size = 0.2) +
+  scale_fill_distiller(
+    palette = "RdBu",        # 红-蓝发散色系
+    name = "Difference",
+    limits = c(-1, 1),       # 固定范围到 [-1, 1]
+    #oob = scales::squish     # 超出范围的值压缩到边界色
+  ) +
+  theme_minimal() +
+  labs(
+    title = "Difference in Regional Estimates",
+    subtitle = "BART - Backward",
+    x = "Longitude", y = "Latitude"
+  ) +
+  theme(
+    legend.position = "right",
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 12)
+  ) ;w
+ggsave(filename=paste0("C:/Users/霍湘月/Desktop/defaultprior/", "regions.6.png"), plot = w, width = 10, height = 6, dpi = 300, bg="white")
+
+
+```
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+tab <- read_excel("C:/Users/霍湘月/Desktop/uncertaintydiffence.xlsx")
+
+names(tab)
+heat_df <- tab %>%
+  transmute(Region,
+            `BART - Backward` = def.b.8,
+            `SVR  - Backward` = def.s.8)%>%
+   pivot_longer(-Region, names_to = "Method", values_to = "Delta") %>%
+  mutate(Region = factor(Region, levels = paste0("Region ", 1:10)))
+
+pp<-ggplot(heat_df, aes(x = Region, y = Method, fill = Delta)) +
+  geom_tile(color = "white") +
+  scale_fill_distiller(palette = "RdBu", limits = c(-1, 1), oob = scales::squish) +
+  labs(x = NULL, y = NULL, fill = "Δ Uncertainty") +
+  theme_minimal(base_size = 18) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1));pp
+
+```
+
+```{r no use}
+
+tab_long <- tab %>%
+  mutate(
+    Region = factor(Region, levels = Region),
+    bart   = `def.b.8`,   # BART - Backward
+    svr    = `def.s.8`    # SVR  - Backward
+  ) %>%
+  pivot_longer(c(bart, svr), names_to = "Method", values_to = "Delta") %>%
+  mutate(
+    Method = factor(Method,
+                    levels = c("bart", "svr"),
+                    labels = c("BART - Backward", "SVR  - Backward"))
+  )
+
+# 原始范围（非对称）
+rng1 <- min(tab_long$Delta, na.rm = TRUE)
+rng2 <- max(tab_long$Delta, na.rm = TRUE)
+
+t <- ggplot(tab_long, aes(x = Region, y = Delta, fill = Method)) +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
+  geom_col(position = position_dodge(width = 0.7), width = 0.6) +
+  coord_flip() +
+  scale_fill_manual(values = c("BART - Backward" = "#377EB8",
+                               "SVR  - Backward" = "#E41A1C"),
+                    name = NULL) +
+  scale_y_continuous(limits = c(rng1, rng2),
+                     expand = expansion(mult = c(0.02, 0.02))) +  # 防止顶端被裁
+  labs(x = NULL,
+       y = "Difference in Uncertainty (vs Backward)") +
+  theme_bw() +
+  theme(axis.title.y = element_blank(),
+        legend.position = "top")
+
+t
+
+
+#ggsave(filename=paste0("C:/Users/霍湘月/Desktop/defaultprior/", "regions.8.png"), plot = t, width = 10, height = 6, dpi = 300, bg="white")
+
+
+```
+
+
+
+
