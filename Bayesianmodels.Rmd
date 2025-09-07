@@ -12,12 +12,12 @@ knitr::opts_chunk$set(echo = TRUE)
 #-----------------------------------------Preparation part
 
 ```{r paths}
-results_path_b<-"C:/Users/xy/Desktop/p4-INLASPDE/results-R-stepwise/backward"
-results_path_f<-"C:/Users/xy/Desktop/p4-INLASPDE/results-R-stepwise/forward"
-bart_results_path_b<-"C:/Users/xy/Desktop/p4-INLASPDE/results-R-bart/backward"
-bart_results_path_f<-"C:/Users/xy/Desktop/p4-INLASPDE/results-R-bart/forward"
-svr_results_path_b<-"C:/Users/xy/Desktop/p4-INLASPDE/results-R-svr/backward"
-svr_results_path_f<-"C:/Users/xy/Desktop/p4-INLASPDE/results-R-svr/forward"
+results_path_b<-"C:/Users/xh2u24/Desktop/p4-INLASPDE/results-R-stepwise/backward"
+results_path_f<-"C:/Users/xh2u24/Desktop/p4-INLASPDE/results-R-stepwise/forward"
+bart_results_path_b<-"C:/Users/xh2u24/Desktop/p4-INLASPDE/results-R-bart/backward"
+bart_results_path_f<-"C:/Users/xh2u24/Desktop/p4-INLASPDE/results-R-bart/forward"
+svr_results_path_b<-"C:/Users/xh2u24/Desktop/p4-INLASPDE/results-R-svr/backward"
+svr_results_path_f<-"C:/Users/xh2u24/Desktop/p4-INLASPDE/results-R-svr/forward"
 ```
 
 ```{r packages}
@@ -224,26 +224,11 @@ shp <- valid ; table(st_is_valid(shp))
 table(st_is_empty(shp))
 
 ### build neighbourhood structures 
-
-####------------------------------------------------
-#shp_proj <- st_transform(shp, 32632)
-#coords   <- st_coordinates(st_centroid(shp_proj))
-#dup_id   <- duplicated(coords)        # TRUE 处是重复质心
-#set.seed(35642114)
-#coords[dup_id, ] <- coords[dup_id, ] +
-# matrix(runif(sum(dup_id)*2, -0.01, 0.01), ncol = 2)  # ±1 cm
-#nb <- knn2nb(knearneigh(coords, k = 6)) ; table(card(nb))# no 0 then can do Moran's I, LISA, spatial reg
-############----------------------------------------------------
-
 nb <- poly2nb(shp, queen=TRUE)  
-#table(card(nb))#0的个数为孤岛???;1e-7 is default
-#将空间邻接对??? nb 转换为空间权重矩???(spatial weights list)
-#的格???,用于后续的空间分???(??? Moran’s I、空间回归等)
 lw <- nb2listw(nb, style="W", zero.policy=TRUE)
-
 moran.test(shp$O_LHHSI,lw, alternative="greater", zero.policy=TRUE)
 # O_LHHSI: is the population size variable
-# Moran's I stat = 0.149, p-value = 0.0002; k近邻后statistic=0.115, p-value <2.2e-16
+# Moran's I stat = 0.149, p-value = 0.0002
 # there is spatial clutering in the data
 
 #-- INLA-SPDE latent field preparation-------------
@@ -327,20 +312,17 @@ dim(A)
 
 #-- visualise the spatial fields of the best model----
 gproj <- inla.mesh.projector(mesh,  dims = c(300, 300))
-#创建一个空间投影器,用于将空间场投影到300*300的规则网格上
-bb <- non_convex_bdry$loc # the coordiates (提取原始构建的非凸包边界)
+bb <- non_convex_bdry$loc 
 
-library(splancs) # for inout function for mapping-哪些300*300网格点落在边界bb之内
+library(splancs)
 table(xy.in <- inout(gproj$lattice$loc,bb))
-# FALSE  TRUE # 30229个网格点落在边界(可以用来画图),其余的要删除
-# 59771 30229
 #FALSE  TRUE 
 #59468 30532 
 ```
 
 ```{r uncertainty using }
 #| label: preparation
-data_path<-"C:/Users/霍湘月/Desktop/p4-INLASPDE/code"
+data_path<-"C:/Users/xh2u24/Desktop/p4-INLASPDE/code"
 pred_data <- readRDS(paste0(data_path, "/full_prediction_data.RDS"))
 data <- pred_data
 head(data)
@@ -623,13 +605,10 @@ names(dat)
 bart_stk_est <- inla.stack(data=list(y=dat$dens), # the response variable 
                       
                       A=list(A,1),  # the A matrix; the 1 is included to make the list(covariates)
-                      
-                      
-                      effects=list(c(list(Intercept=1), # the Intercept
+                        effects=list(c(list(Intercept=1), # the Intercept
                                      iset),  # the spatial index
                                    list(bart_covars_est)# the covariates
                       ), 
-                      #this is a quick name so you can call upon easily
                       tag='est')
 
 #-- build spatial models----
@@ -871,16 +850,13 @@ names(dat)
 
 #-- Build data stack----
 svr_stk_est <- inla.stack(data=list(y=dat$dens), # the response variable 
-                      
                       A=list(A,1),  # the A matrix; the 1 is included to make the list(covariates)
-                      #第一个是空间投影矩阵，第二个用于固定效应
-                      
                       effects=list(c(list(Intercept=1), # the Intercept
                                      iset),  # the spatial index
                                    list(svr_covars_est)# the covariates
                       ), 
                       #this is a quick name so you can call upon easily
-                      tag='est')#给这个stack起这个名字
+                      tag='est')
 
 #-- build spatial models----
 # Model 1: covS_svr + Spatial autocor + settlement type
@@ -1110,6 +1086,7 @@ print(tbl6<-tbl6[order(tbl6$CPO), ], digits = 2)
 write.csv(tbl6, file=paste0(svr_results_path_f, "/svr_cpo_f2.csv"))
 
 ```
+
 
 
 
